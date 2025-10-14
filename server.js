@@ -274,6 +274,17 @@ let priceCache = null;
 let lastPriceUpdate = 0;
 const CACHE_DURATION = 30000; // 30 secondes
 
+// 🔥 MISE À JOUR AUTOMATIQUE TOUTES LES 30 SECONDES
+setInterval(async () => {
+  try {
+    console.log("🔄 Mise à jour automatique des prix crypto...");
+    lastPriceUpdate = 0; // Forcer le refresh
+    await fetchCryptoPrices();
+  } catch (error) {
+    console.error("❌ Erreur mise à jour auto:", error);
+  }
+}, 30000); // 30 secondes
+
 // Fonction pour récupérer les prix en temps réel
 async function fetchCryptoPrices() {
   // Utiliser le cache si moins de 30 secondes
