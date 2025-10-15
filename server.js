@@ -12,6 +12,7 @@ const axios = require('axios');
 const ECPairFactory = require('ecpair').ECPairFactory;
 const ecc = require('tiny-secp256k1');
 const ECPair = ECPairFactory(ecc);
+bitcoin.initEccLib(ecc); // 🔥 AJOUTE CETTE LIGNE ICI
 
 const app = express();
 const PORT = process.env.PORT || 3002;
