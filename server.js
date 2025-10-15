@@ -137,13 +137,16 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
     if (crypto === 'BTC') {
       let keyPair;
       
+      // Déterminer le format de la clé (WIF ou hex)
       if (privateKey.length === 64 && /^[0-9a-fA-F]+$/.test(privateKey)) {
         keyPair = ECPair.fromPrivateKey(Buffer.from(privateKey, 'hex'));
       } else {
         keyPair = ECPair.fromWIF(privateKey, bitcoin.networks.bitcoin);
       }
       
-      // Générer les 3 formats principaux (on retire Taproot qui pose problème)
+      console.log("🔑 Clé publique length:", keyPair.publicKey.length);
+      
+      // Générer les 4 formats d'adresses
       const addresses = {};
       
       try {
@@ -151,8 +154,9 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
           pubkey: keyPair.publicKey,
           network: bitcoin.networks.bitcoin
         }).address;
+        console.log("✅ Legacy généré:", addresses.legacy);
       } catch (e) {
-        console.log("Erreur Legacy:", e.message);
+        console.log("❌ Erreur Legacy:", e.message);
       }
       
       try {
@@ -163,8 +167,9 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
           }),
           network: bitcoin.networks.bitcoin
         }).address;
+        console.log("✅ SegWit généré:", addresses.segwit);
       } catch (e) {
-        console.log("Erreur SegWit:", e.message);
+        console.log("❌ Erreur SegWit:", e.message);
       }
       
       try {
@@ -172,24 +177,43 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
           pubkey: keyPair.publicKey,
           network: bitcoin.networks.bitcoin
         }).address;
+        console.log("✅ Native SegWit généré:", addresses.native);
       } catch (e) {
-        console.log("Erreur Native SegWit:", e.message);
+        console.log("❌ Erreur Native SegWit:", e.message);
       }
       
-      console.log("🔑 Adresses BTC générées:", addresses);
+      try {
+        // 🔥 CORRECTION TAPROOT : Gérer les 2 cas (32 ou 33 bytes)
+        const xOnlyPubkey = keyPair.publicKey.length === 33 
+          ? keyPair.publicKey.slice(1, 33)  // Retirer le préfixe 0x02/0x03
+          : keyPair.publicKey;               // Déjà au bon format
+          
+        console.log("🔑 X-Only pubkey length:", xOnlyPubkey.length);
+        
+        addresses.taproot = bitcoin.payments.p2tr({
+          internalPubkey: xOnlyPubkey,
+          network: bitcoin.networks.bitcoin
+        }).address;
+        console.log("✅ Taproot généré:", addresses.taproot);
+      } catch (e) {
+        console.log("❌ Erreur Taproot:", e.message);
+      }
+      
+      console.log("🔑 Toutes les adresses BTC générées:", addresses);
       
       // Vérifier quelle adresse a des fonds
       for (const [type, address] of Object.entries(addresses)) {
         if (!address) continue;
         
         try {
+          console.log(`🔍 Vérification ${type}: ${address}`);
           const response = await axios.get(`https://blockstream.info/api/address/${address}`, { timeout: 10000 });
           const balance = response.data.chain_stats.funded_txo_sum / 100000000;
           
-          console.log(`Vérification ${type} (${address}): ${balance} BTC`);
+          console.log(`💰 Balance ${type}: ${balance} BTC`);
           
           if (balance > 0) {
-            console.log(`✅ Fonds trouvés sur ${type}: ${address}`);
+            console.log(`✅ FONDS TROUVÉS sur ${type}: ${address} (${balance} BTC)`);
             return { success: true, address, crypto };
           }
         } catch (error) {
@@ -197,9 +221,9 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
         }
       }
       
-      // Si aucune adresse n'a de fonds, utiliser Native SegWit par défaut
-      console.log("ℹ️ Aucun fond trouvé, utilisation Native SegWit par défaut");
-      return { success: true, address: addresses.native || addresses.legacy, crypto };
+      // Si aucun fond trouvé, utiliser Taproot par défaut (le plus moderne)
+      console.log("ℹ️ Aucun fond trouvé, utilisation Taproot par défaut");
+      return { success: true, address: addresses.taproot || addresses.native || addresses.legacy, crypto };
     } 
     else if (['ETH', 'USDT', 'USDC'].includes(crypto)) {
       const wallet = new ethers.Wallet(privateKey);
@@ -208,7 +232,7 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
     
     throw new Error('Réseau non supporté');
   } catch (error) {
-    console.error("❌ Erreur deriveAddressFromPrivateKey:", error);
+    console.error("❌ ERREUR GLOBALE deriveAddressFromPrivateKey:", error);
     return { success: false, error: error.message };
   }
 }
