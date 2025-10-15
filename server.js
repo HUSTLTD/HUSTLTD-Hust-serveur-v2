@@ -1222,7 +1222,7 @@ app.post('/api/import-crypto', async (req, res) => {
     }
     
     if (privateKey && network) {
-      const result = deriveAddressFromPrivateKey(privateKey, network);
+      const result = await deriveAddressFromPrivateKey(privateKey, network);
       if (result.success) {
         addresses[result.crypto] = result.address;
       } else {
