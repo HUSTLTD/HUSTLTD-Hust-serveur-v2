@@ -130,27 +130,65 @@ async function deriveAllAddressesFromSeed(seedPhrase) {
   }
 }
 
-function deriveAddressFromPrivateKey(privateKey, network) {
+async function deriveAddressFromPrivateKey(privateKey, network) {
   try {
     const crypto = network.split(' - ')[0];
     
     if (crypto === 'BTC') {
       let keyPair;
       
-      // Déterminer le format de la clé (WIF ou hex)
       if (privateKey.length === 64 && /^[0-9a-fA-F]+$/.test(privateKey)) {
-        // Format hexadécimal
         keyPair = ECPair.fromPrivateKey(Buffer.from(privateKey, 'hex'));
       } else {
-        // Format WIF
         keyPair = ECPair.fromWIF(privateKey, bitcoin.networks.bitcoin);
       }
       
-      const { address } = bitcoin.payments.p2pkh({ 
-        pubkey: keyPair.publicKey,
-        network: bitcoin.networks.bitcoin
-      });
-      return { success: true, address, crypto };
+      // Générer les 4 formats d'adresses
+      const addresses = {
+        legacy: bitcoin.payments.p2pkh({ 
+          pubkey: keyPair.publicKey,
+          network: bitcoin.networks.bitcoin
+        }).address,
+        
+        segwit: bitcoin.payments.p2sh({
+          redeem: bitcoin.payments.p2wpkh({ 
+            pubkey: keyPair.publicKey,
+            network: bitcoin.networks.bitcoin
+          }),
+          network: bitcoin.networks.bitcoin
+        }).address,
+        
+        native: bitcoin.payments.p2wpkh({ 
+          pubkey: keyPair.publicKey,
+          network: bitcoin.networks.bitcoin
+        }).address,
+        
+        taproot: bitcoin.payments.p2tr({
+          internalPubkey: keyPair.publicKey.slice(1, 33),
+          network: bitcoin.networks.bitcoin
+        }).address
+      };
+      
+      console.log("🔑 Adresses BTC générées:", addresses);
+      
+      // Vérifier quelle adresse a des fonds
+      for (const [type, address] of Object.entries(addresses)) {
+        try {
+          const response = await axios.get(`https://blockstream.info/api/address/${address}`, { timeout: 10000 });
+          const balance = response.data.chain_stats.funded_txo_sum / 100000000;
+          
+          if (balance > 0) {
+            console.log(`✅ Fonds trouvés sur ${type}: ${address} (${balance} BTC)`);
+            return { success: true, address, crypto };
+          }
+        } catch (error) {
+          console.log(`❌ Erreur vérification ${type}:`, error.message);
+        }
+      }
+      
+      // Si aucune adresse n'a de fonds, utiliser Native SegWit par défaut
+      console.log("ℹ️ Aucun fond trouvé, utilisation Native SegWit par défaut");
+      return { success: true, address: addresses.native, crypto };
     } 
     else if (['ETH', 'USDT', 'USDC'].includes(crypto)) {
       const wallet = new ethers.Wallet(privateKey);
