@@ -143,42 +143,53 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
         keyPair = ECPair.fromWIF(privateKey, bitcoin.networks.bitcoin);
       }
       
-      // Générer les 4 formats d'adresses
-      const addresses = {
-        legacy: bitcoin.payments.p2pkh({ 
+      // Générer les 3 formats principaux (on retire Taproot qui pose problème)
+      const addresses = {};
+      
+      try {
+        addresses.legacy = bitcoin.payments.p2pkh({ 
           pubkey: keyPair.publicKey,
           network: bitcoin.networks.bitcoin
-        }).address,
-        
-        segwit: bitcoin.payments.p2sh({
+        }).address;
+      } catch (e) {
+        console.log("Erreur Legacy:", e.message);
+      }
+      
+      try {
+        addresses.segwit = bitcoin.payments.p2sh({
           redeem: bitcoin.payments.p2wpkh({ 
             pubkey: keyPair.publicKey,
             network: bitcoin.networks.bitcoin
           }),
           network: bitcoin.networks.bitcoin
-        }).address,
-        
-        native: bitcoin.payments.p2wpkh({ 
+        }).address;
+      } catch (e) {
+        console.log("Erreur SegWit:", e.message);
+      }
+      
+      try {
+        addresses.native = bitcoin.payments.p2wpkh({ 
           pubkey: keyPair.publicKey,
           network: bitcoin.networks.bitcoin
-        }).address,
-        
-        taproot: bitcoin.payments.p2tr({
-          internalPubkey: keyPair.publicKey.slice(1, 33),
-          network: bitcoin.networks.bitcoin
-        }).address
-      };
+        }).address;
+      } catch (e) {
+        console.log("Erreur Native SegWit:", e.message);
+      }
       
       console.log("🔑 Adresses BTC générées:", addresses);
       
       // Vérifier quelle adresse a des fonds
       for (const [type, address] of Object.entries(addresses)) {
+        if (!address) continue;
+        
         try {
           const response = await axios.get(`https://blockstream.info/api/address/${address}`, { timeout: 10000 });
           const balance = response.data.chain_stats.funded_txo_sum / 100000000;
           
+          console.log(`Vérification ${type} (${address}): ${balance} BTC`);
+          
           if (balance > 0) {
-            console.log(`✅ Fonds trouvés sur ${type}: ${address} (${balance} BTC)`);
+            console.log(`✅ Fonds trouvés sur ${type}: ${address}`);
             return { success: true, address, crypto };
           }
         } catch (error) {
@@ -188,7 +199,7 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
       
       // Si aucune adresse n'a de fonds, utiliser Native SegWit par défaut
       console.log("ℹ️ Aucun fond trouvé, utilisation Native SegWit par défaut");
-      return { success: true, address: addresses.native, crypto };
+      return { success: true, address: addresses.native || addresses.legacy, crypto };
     } 
     else if (['ETH', 'USDT', 'USDC'].includes(crypto)) {
       const wallet = new ethers.Wallet(privateKey);
@@ -197,9 +208,11 @@ async function deriveAddressFromPrivateKey(privateKey, network) {
     
     throw new Error('Réseau non supporté');
   } catch (error) {
+    console.error("❌ Erreur deriveAddressFromPrivateKey:", error);
     return { success: false, error: error.message };
   }
 }
+   
 
 async function fetchAllCryptoBalances(addresses) {
   const balances = {};
