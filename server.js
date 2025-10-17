@@ -557,7 +557,7 @@ app.put('/api/users/:email', async (req, res) => {
   }
 });
 
-// PUT - Modifier le solde d'un utilisateur (pour l'interface admin)
+// PUT - Modifier le Hust Balance (cash) d'un utilisateur
 app.put('/api/users/:email/balance', async (req, res) => {
   try {
     const email = req.params.email.toLowerCase();
@@ -573,7 +573,13 @@ app.put('/api/users/:email/balance', async (req, res) => {
     const users = await readData();
     
     if (users[email]) {
-      users[email].balance = balance;
+      // 🔥 Modifier directement cashBalance
+      users[email].cashBalance = balance;
+      
+      // Recalculer le balance total
+      const cryptoValue = users[email].cryptoWallet?.totalValue || 0;
+      users[email].balance = balance + cryptoValue;
+      
       users[email].lastUpdated = new Date().toISOString();
       
       const saved = await writeDataSafe(users);
@@ -581,13 +587,13 @@ app.put('/api/users/:email/balance', async (req, res) => {
       if (saved) {
         res.json({
           success: true,
-          message: 'Solde mis à jour',
+          message: 'Hust Balance mis à jour',
           user: users[email]
         });
       } else {
         res.status(500).json({
           success: false,
-          message: 'Erreur lors de la mise à jour du solde'
+          message: 'Erreur lors de la mise à jour'
         });
       }
     } else {
@@ -1078,8 +1084,8 @@ app.get('/', (req, res) => {
                         <div class="user-email">\${user.email}</div>
                         <div class="user-name">\${user.fullName || user.firstName + ' ' + user.lastName}</div>
                     </div>
-                    <div class="user-balance" id="balance-\${email.replace(/[^a-zA-Z0-9]/g, '_')}">\${(user.balance || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</div>
-                    <button class="edit-btn" onclick="editBalance('\${email}', \${user.balance || 0})">Modifier</button>
+                    <div class="user-balance" id="balance-\${email.replace(/[^a-zA-Z0-9]/g, '_')}">\${(user.cashBalance !== undefined ? user.cashBalance : user.balance || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</div>
+                    <button class="edit-btn" onclick="editBalance('\${email}', \${user.cashBalance !== undefined ? user.cashBalance : user.balance || 0})">Modifier</button>
                 </div>
             \`).join('');
         }
@@ -1153,7 +1159,7 @@ app.get('/', (req, res) => {
                         maximumFractionDigits: 2
                     }) + '€';
                     
-                    showStatus('Solde mis à jour avec succès !');
+                    showStatus('Hust Balance mis à jour avec succès !');
                     
                     const statsResponse = await fetch('/api/stats');
                     const statsData = await statsResponse.json();
