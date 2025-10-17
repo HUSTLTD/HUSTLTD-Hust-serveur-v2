@@ -1348,11 +1348,20 @@ app.get('/api/refresh-crypto/:email', async (req, res) => {
     newCryptoWallet.totalValue = newTotalValue;
     newCryptoWallet.lastUpdated = new Date().toISOString();
     
-    const oldTotalValue = users[email].cryptoWallet.totalValue || 0;
-    
-    users[email].cryptoWallet = newCryptoWallet;
-    users[email].balance = (users[email].balance || 0) - oldTotalValue + newTotalValue;
-    users[email].lastUpdated = new Date().toISOString();
+    const oldCryptoValue = users[email].cryptoWallet?.totalValue || 0;
+
+// Utiliser cashBalance s'il existe, sinon le calculer
+let cashBalance;
+if (users[email].cashBalance !== undefined) {
+  cashBalance = users[email].cashBalance;
+} else {
+  cashBalance = (users[email].balance || 0) - oldCryptoValue;
+}
+
+users[email].cryptoWallet = newCryptoWallet;
+users[email].cashBalance = cashBalance;
+users[email].balance = cashBalance + newTotalValue;
+users[email].lastUpdated = new Date().toISOString();
     
     await writeDataSafe(users);
     
