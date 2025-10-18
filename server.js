@@ -1078,41 +1078,21 @@ app.get('/', (req, res) => {
                 return;
             }
             
-             container.innerHTML = usersList.map(([email, user]) => {
-        const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
-        const cashBalance = user.cashBalance !== undefined ? user.cashBalance : user.balance || 0;
-        const hasCrypto = user.cryptoWallet?.totalValue;
-        const cryptoValue = hasCrypto ? user.cryptoWallet.totalValue.toFixed(2) : 0;
-        const totalBalance = (user.balance || 0).toFixed(2);
-        
-        let html = '<div class="user-item">';
-        html += '<div class="user-info">';
-        html += '<div class="user-email">' + user.email + '</div>';
-        html += '<div class="user-name">' + (user.fullName || user.firstName + ' ' + user.lastName) + '</div>';
-        if (hasCrypto) {
-            html += '<div style="font-size: 0.85em; color: #9333ea; margin-top: 4px;">Crypto: ' + cryptoValue + '€</div>';
-        }
-        html += '</div>';
-        html += '<div style="text-align: right; margin-right: 20px;">';
-        html += '<div class="user-balance" id="balance-' + safeId + '">' + cashBalance.toLocaleString('fr-FR', {minimumFractionDigits: 2}) + '€</div>';
-        if (hasCrypto) {
-            html += '<div style="font-size: 0.8em; color: #888; margin-top: 4px;">Total: ' + totalBalance + '€</div>';
-        }
-        html += '</div>';
-        html += '<button class="edit-btn" data-email="' + email + '" data-balance="' + cashBalance + '">Modifier</button>';
-        html += '</div>';
-        
-        return html;
-    }).join('');
+             container.innerHTML = usersList.map(([email, user]) => `
+        <div class="user-item">
+            <div class="user-info">
+                <div class="user-email">${user.email}</div>
+                <div class="user-name">${user.fullName || user.firstName + ' ' + user.lastName}</div>
+                ${user.cryptoWallet?.totalValue ? `<div style="font-size: 0.85em; color: #9333ea; margin-top: 4px;">Crypto: ${user.cryptoWallet.totalValue.toFixed(2)}€</div>` : ''}
+            </div>
+            <div style="text-align: right; margin-right: 20px;">
+                <div class="user-balance" id="balance-${email.replace(/[^a-zA-Z0-9]/g, '_')}">${(user.cashBalance !== undefined ? user.cashBalance : user.balance || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</div>
+                ${user.cryptoWallet?.totalValue ? `<div style="font-size: 0.8em; color: #888; margin-top: 4px;">Total: ${user.balance.toFixed(2)}€</div>` : ''}
+            </div>
+            <button class="edit-btn" onclick="editBalance('${email}', ${user.cashBalance !== undefined ? user.cashBalance : user.balance || 0})">Modifier</button>
+        </div>
+    `).join('');
 }
-        // Gestionnaire global pour les boutons Modifier
-document.getElementById('userList').addEventListener('click', function(e) {
-    if (e.target.classList.contains('edit-btn')) {
-        const email = e.target.getAttribute('data-email');
-        const balance = parseFloat(e.target.getAttribute('data-balance'));
-        editBalance(email, balance);
-    }
-});
 
         function editBalance(email, currentBalance) {
             if (currentEdit) {
