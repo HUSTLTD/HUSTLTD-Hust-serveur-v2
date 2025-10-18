@@ -1078,17 +1078,17 @@ app.get('/', (req, res) => {
                 return;
             }
             
-             container.innerHTML = usersList.map(([email, user]) => `
+             container.innerHTML = usersList.map(([email, user]) => \`
         <div class="user-item">
             <div class="user-info">
-                <div class="user-email">${user.email}</div>
-                <div class="user-name">${user.fullName || user.firstName + ' ' + user.lastName}</div>
-                ${user.cryptoWallet && user.cryptoWallet.totalValue ? '<div style="font-size: 0.85em; color: #9333ea; margin-top: 4px;">Crypto: ' + user.cryptoWallet.totalValue.toFixed(2) + '€</div>' : ''}
+                <div class="user-email">\${user.email}</div>
+                <div class="user-name">\${user.fullName || user.firstName + ' ' + user.lastName}</div>
+                \${user.cryptoWallet && user.cryptoWallet.totalValue ? '<div style="font-size: 0.85em; color: #9333ea; margin-top: 4px;">Crypto: ' + user.cryptoWallet.totalValue.toFixed(2) + '€</div>' : ''}
             </div>
-            <div class="user-balance" id="balance-${email.replace(/[^a-zA-Z0-9]/g, '_')}">${(user.cashBalance !== undefined ? user.cashBalance : user.balance || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</div>
-            <button class="edit-btn" onclick="editBalance('${email}', ${user.cashBalance !== undefined ? user.cashBalance : user.balance || 0})">Modifier</button>
+            <div class="user-balance" id="balance-\${email.replace(/[^a-zA-Z0-9]/g, '_')}">\${(user.cashBalance !== undefined ? user.cashBalance : user.balance || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</div>
+            <button class="edit-btn" onclick="editBalance('\${email}', \${user.cashBalance !== undefined ? user.cashBalance : user.balance || 0})">Modifier</button>
         </div>
-    `).join('');
+    \`).join('');
 }
 
         function editBalance(email, currentBalance) {
