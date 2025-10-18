@@ -1104,16 +1104,16 @@ app.get('/', (req, res) => {
         
         return html;
     }).join('');
-    
-    setTimeout(() => {
-        document.querySelectorAll('.edit-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                editBalance(this.dataset.email, parseFloat(this.dataset.balance));
-            });
-        });
-    }, 0);
 }
-        
+        // Gestionnaire global pour les boutons Modifier
+document.getElementById('userList').addEventListener('click', function(e) {
+    if (e.target.classList.contains('edit-btn')) {
+        const email = e.target.getAttribute('data-email');
+        const balance = parseFloat(e.target.getAttribute('data-balance'));
+        editBalance(email, balance);
+    }
+});
+
         function editBalance(email, currentBalance) {
             if (currentEdit) {
                 cancelEdit();
