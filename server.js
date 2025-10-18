@@ -1078,7 +1078,7 @@ app.get('/', (req, res) => {
                 return;
             }
             
-            container.innerHTML = usersList.map(([email, user]) => {
+             container.innerHTML = usersList.map(([email, user]) => {
         const safeId = email.replace(/[^a-zA-Z0-9]/g, '_');
         const cashBalance = user.cashBalance !== undefined ? user.cashBalance : user.balance || 0;
         const hasCrypto = user.cryptoWallet?.totalValue;
@@ -1099,11 +1099,19 @@ app.get('/', (req, res) => {
             html += '<div style="font-size: 0.8em; color: #888; margin-top: 4px;">Total: ' + totalBalance + '€</div>';
         }
         html += '</div>';
-        html += '<button class="edit-btn" onclick="editBalance(\'' + email + '\', ' + cashBalance + ')">Modifier</button>';
+        html += '<button class="edit-btn" data-email="' + email + '" data-balance="' + cashBalance + '">Modifier</button>';
         html += '</div>';
         
         return html;
     }).join('');
+    
+    setTimeout(() => {
+        document.querySelectorAll('.edit-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                editBalance(this.dataset.email, parseFloat(this.dataset.balance));
+            });
+        });
+    }, 0);
 }
         
         function editBalance(email, currentBalance) {
