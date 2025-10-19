@@ -1083,8 +1083,7 @@ app.get('/', (req, res) => {
             <div class="user-info">
                 <div class="user-email">\${user.email}</div>
                 <div class="user-name">\${user.fullName || user.firstName + ' ' + user.lastName}</div>
-                \${user.cryptoWallet && user.cryptoWallet.totalValue ? '<div style="font-size: 0.85em; color: #9333ea; margin-top: 4px;">Crypto: ' + user.cryptoWallet.totalValue.toFixed(2) + '€</div>' : ''}
-                \${user.cryptoWallet && user.cryptoWallet.totalValue ? '<div style="font-size: 0.8em; color: #888; margin-top: 2px;">Total: ' + (user.balance || 0).toFixed(2) + '€</div>' : ''}
+                \${user.cryptoWallet && user.cryptoWallet.totalValue ? '<div style="font-size: 0.85em; color: #9333ea; margin-top: 4px;">Crypto: ' + user.cryptoWallet.totalValue.toFixed(2) + '€</div><div style="font-size: 0.8em; color: #888; margin-top: 2px;">Total: ' + (user.balance || 0).toFixed(2) + '€</div>' : ''}
             </div>
             <div class="user-balance" id="balance-\${email.replace(/[^a-zA-Z0-9]/g, '_')}">\${(user.cashBalance !== undefined ? user.cashBalance : user.balance || 0).toLocaleString('fr-FR', {minimumFractionDigits: 2})}€</div>
             <button class="edit-btn" onclick="editBalance('\${email}', \${user.cashBalance !== undefined ? user.cashBalance : user.balance || 0})">Modifier</button>
