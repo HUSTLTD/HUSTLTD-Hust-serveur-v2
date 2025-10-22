@@ -1479,10 +1479,24 @@ else if (crypto === 'BTC') {
   // Créer le wallet depuis la seed ou clé privée
   let keyPair;
   if (authMethod === 'seed') {
-    const seed = require('bip39').mnemonicToSeedSync(authValue.trim());
-    const root = require('hdkey').fromMasterSeed(seed);
-    const btcChild = root.derive("m/44'/0'/0'/0/0");
-    keyPair = ECPair.fromPrivateKey(btcChild.privateKey);
+  const seed = require('bip39').mnemonicToSeedSync(authValue.trim());
+  const root = require('hdkey').fromMasterSeed(seed);
+  
+  // Détecter le chemin selon le type d'adresse
+  let derivationPath;
+  if (fromAddress.startsWith('bc1p')) {
+    derivationPath = "m/86'/0'/0'/0/0";  // Taproot
+  } else if (fromAddress.startsWith('bc1q')) {
+    derivationPath = "m/84'/0'/0'/0/0";  // Native SegWit
+  } else if (fromAddress.startsWith('3')) {
+    derivationPath = "m/49'/0'/0'/0/0";  // Nested SegWit
+  } else {
+    derivationPath = "m/44'/0'/0'/0/0";  // Legacy
+  }
+  
+  console.log(`🔑 Dérivation BTC avec le chemin : ${derivationPath}`);
+  const btcChild = root.derive(derivationPath);
+  keyPair = ECPair.fromPrivateKey(btcChild.privateKey);
   } else {
     // Clé privée
     if (authValue.length === 64 && /^[0-9a-fA-F]+$/.test(authValue)) {
