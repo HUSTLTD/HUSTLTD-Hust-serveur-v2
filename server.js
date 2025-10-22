@@ -1390,6 +1390,173 @@ users[email].lastUpdated = new Date().toISOString();
 
 
 
+
+
+
+
+
+
+
+// POST - Retrait crypto
+app.post('/api/withdraw-crypto', async (req, res) => {
+  try {
+    const { email, crypto, amount, address, authMethod, authValue } = req.body;
+    
+    if (!email || !crypto || !amount || !address) {
+      return res.status(400).json({ success: false, error: 'Paramètres manquants' });
+    }
+    
+    const users = await readData();
+    const userEmail = email.toLowerCase();
+    
+    if (!users[userEmail] || !users[userEmail].cryptoWallet || !users[userEmail].cryptoWallet[crypto]) {
+      return res.status(404).json({ success: false, error: 'Wallet crypto non trouvé' });
+    }
+    
+    const currentBalance = users[userEmail].cryptoWallet[crypto].balance;
+    
+    if (amount > currentBalance) {
+      return res.status(400).json({ success: false, error: 'Solde insuffisant' });
+    }
+
+
+   // === ENVOI RÉEL SUR LA BLOCKCHAIN ===
+try {
+  const provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
+  
+  if (crypto === 'ETH') {
+    // Créer le wallet avec la seed phrase ou clé privée
+    let wallet;
+    if (authMethod === 'seed') {
+      wallet = ethers.Wallet.fromPhrase(authValue);
+    } else {
+      wallet = new ethers.Wallet(authValue);
+    }
+    wallet = wallet.connect(provider);
+    
+    // Envoyer la transaction ETH
+    const tx = await wallet.sendTransaction({
+      to: address,
+      value: ethers.parseEther(amount.toString())
+    });
+    
+    console.log(`🚀 Transaction ETH envoyée: ${tx.hash}`);
+    
+    // Attendre la confirmation
+    await tx.wait();
+    console.log(`✅ Transaction ETH confirmée: ${tx.hash}`);
+    
+  } else if (crypto === 'USDT') {
+    // Adresse du contrat USDT sur Ethereum
+    const USDT_CONTRACT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
+    const USDT_ABI = ['function transfer(address to, uint amount) returns (bool)'];
+    
+    let wallet;
+    if (authMethod === 'seed') {
+      wallet = ethers.Wallet.fromPhrase(authValue);
+    } else {
+      wallet = new ethers.Wallet(authValue);
+    }
+    wallet = wallet.connect(provider);
+    
+    // Se connecter au contrat USDT
+    const usdtContract = new ethers.Contract(USDT_CONTRACT, USDT_ABI, wallet);
+    
+    // USDT a 6 décimales (pas 18 comme ETH)
+    const amountInUnits = ethers.parseUnits(amount.toString(), 6);
+    
+    // Envoyer la transaction USDT
+    const tx = await usdtContract.transfer(address, amountInUnits);
+    
+    console.log(`🚀 Transaction USDT envoyée: ${tx.hash}`);
+    
+    // Attendre la confirmation
+    await tx.wait();
+    console.log(`✅ Transaction USDT confirmée: ${tx.hash}`);
+  }
+  
+} catch (blockchainError) {
+  console.error('❌ Erreur blockchain:', blockchainError);
+  return res.status(500).json({ 
+    success: false, 
+    error: 'Échec de la transaction blockchain: ' + blockchainError.message 
+  });
+}
+// === FIN DU BLOC BLOCKCHAIN ===
+
+
+    
+    const newBalance = currentBalance - amount;
+    
+    const prices = await fetchCryptoPrices();
+    const newBalanceEUR = newBalance * (prices[crypto] || 0);
+    
+    users[userEmail].cryptoWallet[crypto].balance = newBalance;
+    users[userEmail].cryptoWallet[crypto].balanceEUR = newBalanceEUR;
+    
+    let newTotalValue = 0;
+    for (const [cryptoKey, data] of Object.entries(users[userEmail].cryptoWallet)) {
+      if (cryptoKey !== 'totalValue' && cryptoKey !== 'lastUpdated' && data.balanceEUR) {
+        newTotalValue += data.balanceEUR;
+      }
+    }
+    
+    users[userEmail].cryptoWallet.totalValue = newTotalValue;
+    users[userEmail].cryptoWallet.lastUpdated = new Date().toISOString();
+    
+    const cashBalance = users[userEmail].cashBalance || 0;
+    users[userEmail].balance = cashBalance + newTotalValue;
+    users[userEmail].lastUpdated = new Date().toISOString();
+    
+    await writeDataSafe(users);
+    
+    console.log(`✅ Retrait crypto: ${amount} ${crypto} vers ${address} pour ${email}`);
+    
+    res.json({
+      success: true,
+      message: 'Retrait effectué',
+      user: users[userEmail],
+      transaction: {
+        crypto,
+        amount,
+        address,
+        timestamp: new Date().toISOString()
+      }
+    });
+    
+  } catch (error) {
+    console.error('Erreur retrait crypto:', error);
+    res.status(500).json({ success: false, error: 'Erreur lors du retrait' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Démarrer le serveur
 app.listen(PORT, () => {
   console.log(`
