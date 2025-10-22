@@ -1591,14 +1591,21 @@ else if (crypto === 'BTC') {
   }
   
   // Signer tous les inputs
-  for (let i = 0; i < utxos.length; i++) {
-    if (fromAddress.startsWith('3')) {
-      // SegWit P2SH nécessite le redeemScript
-      psbt.signInput(i, keyPair, [payment.redeem.output]);
-    } else {
-      psbt.signInput(i, keyPair);
-    }
+for (let i = 0; i < utxos.length; i++) {
+  if (fromAddress.startsWith('bc1p')) {
+    // Taproot nécessite un tweaked signer
+    const tweakedSigner = keyPair.tweak(
+      bitcoin.crypto.taggedHash('TapTweak', payment.internalPubkey)
+    );
+    psbt.signInput(i, tweakedSigner);
+  } else if (fromAddress.startsWith('3')) {
+    // SegWit P2SH nécessite le redeemScript
+    psbt.signInput(i, keyPair);
+  } else {
+    // Legacy et Native SegWit
+    psbt.signInput(i, keyPair);
   }
+}
   
   psbt.finalizeAllInputs();
   const txHex = psbt.extractTransaction().toHex();
