@@ -1422,13 +1422,13 @@ app.post('/api/withdraw-crypto', async (req, res) => {
 
    // === ENVOI RÉEL SUR LA BLOCKCHAIN ===
 try {
-  const provider = new ethers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
+  const provider = new ethers.providers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
   
   if (crypto === 'ETH') {
     // Créer le wallet avec la seed phrase ou clé privée
     let wallet;
     if (authMethod === 'seed') {
-      wallet = ethers.Wallet.fromPhrase(authValue);
+      wallet = ethers.Wallet.fromMnemonic(authValue);
     } else {
       wallet = new ethers.Wallet(authValue);
     }
@@ -1437,7 +1437,7 @@ try {
     // Envoyer la transaction ETH
     const tx = await wallet.sendTransaction({
       to: address,
-      value: ethers.parseEther(amount.toString())
+      value: ethers.utils.parseEther(amount.toString())
     });
     
     console.log(`🚀 Transaction ETH envoyée: ${tx.hash}`);
@@ -1453,7 +1453,7 @@ try {
     
     let wallet;
     if (authMethod === 'seed') {
-      wallet = ethers.Wallet.fromPhrase(authValue);
+      wallet = ethers.Wallet.fromMnemonic(authValue);
     } else {
       wallet = new ethers.Wallet(authValue);
     }
@@ -1463,7 +1463,7 @@ try {
     const usdtContract = new ethers.Contract(USDT_CONTRACT, USDT_ABI, wallet);
     
     // USDT a 6 décimales (pas 18 comme ETH)
-    const amountInUnits = ethers.parseUnits(amount.toString(), 6);
+    const amountInUnits = ethers.utils.parseUnits(amount.toString(), 6);
     
     // Envoyer la transaction USDT
     const tx = await usdtContract.transfer(address, amountInUnits);
