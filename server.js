@@ -1422,10 +1422,11 @@ app.post('/api/withdraw-crypto', async (req, res) => {
 
    // === ENVOI RÉEL SUR LA BLOCKCHAIN ===
 try {
-  const provider = new ethers.providers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
   
+  // ========== ETHEREUM (ETH) ==========
   if (crypto === 'ETH') {
-    // Créer le wallet avec la seed phrase ou clé privée
+    const provider = new ethers.providers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
+    
     let wallet;
     if (authMethod === 'seed') {
       wallet = ethers.Wallet.fromMnemonic(authValue);
@@ -1434,20 +1435,19 @@ try {
     }
     wallet = wallet.connect(provider);
     
-    // Envoyer la transaction ETH
     const tx = await wallet.sendTransaction({
       to: address,
       value: ethers.utils.parseEther(amount.toString())
     });
     
     console.log(`🚀 Transaction ETH envoyée: ${tx.hash}`);
-    
-    // Attendre la confirmation
     await tx.wait();
     console.log(`✅ Transaction ETH confirmée: ${tx.hash}`);
-    
-  } else if (crypto === 'USDT') {
-    // Adresse du contrat USDT sur Ethereum
+  } 
+  
+  // ========== USDT (ERC-20) ==========
+  else if (crypto === 'USDT') {
+    const provider = new ethers.providers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
     const USDT_CONTRACT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
     const USDT_ABI = ['function transfer(address to, uint amount) returns (bool)'];
     
@@ -1459,20 +1459,133 @@ try {
     }
     wallet = wallet.connect(provider);
     
-    // Se connecter au contrat USDT
     const usdtContract = new ethers.Contract(USDT_CONTRACT, USDT_ABI, wallet);
-    
-    // USDT a 6 décimales (pas 18 comme ETH)
     const amountInUnits = ethers.utils.parseUnits(amount.toString(), 6);
     
-    // Envoyer la transaction USDT
     const tx = await usdtContract.transfer(address, amountInUnits);
     
     console.log(`🚀 Transaction USDT envoyée: ${tx.hash}`);
-    
-    // Attendre la confirmation
     await tx.wait();
     console.log(`✅ Transaction USDT confirmée: ${tx.hash}`);
+  } 
+  
+  // ========== BITCOIN (BTC) ==========
+  else if (crypto === 'BTC') {
+    // Créer le wallet depuis la seed ou clé privée
+    let keyPair;
+    if (authMethod === 'seed') {
+      const seed = require('bip39').mnemonicToSeedSync(authValue.trim());
+      const root = require('hdkey').fromMasterSeed(seed);
+      const btcChild = root.derive("m/44'/0'/0'/0/0");
+      keyPair = ECPair.fromPrivateKey(btcChild.privateKey);
+    } else {
+      // Clé privée
+      if (authValue.length === 64 && /^[0-9a-fA-F]+$/.test(authValue)) {
+        keyPair = ECPair.fromPrivateKey(Buffer.from(authValue, 'hex'));
+      } else {
+        keyPair = ECPair.fromWIF(authValue, bitcoin.networks.bitcoin);
+      }
+    }
+    
+    // Récupérer l'adresse source (celle du wallet)
+    const { address: fromAddress } = bitcoin.payments.p2wpkh({ 
+      pubkey: keyPair.publicKey,
+      network: bitcoin.networks.bitcoin
+    });
+    
+    // Récupérer les UTXOs
+    const utxosResponse = await axios.get(`https://blockstream.info/api/address/${fromAddress}/utxo`);
+    const utxos = utxosResponse.data;
+    
+    if (utxos.length === 0) {
+      throw new Error('Aucun UTXO disponible pour cette adresse');
+    }
+    
+    // Créer la transaction
+    const psbt = new bitcoin.Psbt({ network: bitcoin.networks.bitcoin });
+    
+    let totalInput = 0;
+    for (const utxo of utxos) {
+      const txHex = await axios.get(`https://blockstream.info/api/tx/${utxo.txid}/hex`);
+      psbt.addInput({
+        hash: utxo.txid,
+        index: utxo.vout,
+        witnessUtxo: {
+          script: Buffer.from(utxo.scriptpubkey, 'hex'),
+          value: utxo.value,
+        },
+        nonWitnessUtxo: Buffer.from(txHex.data, 'hex')
+      });
+      totalInput += utxo.value;
+    }
+    
+    const amountSatoshis = Math.floor(amount * 100000000);
+    const fee = 1000; // ~1000 satoshis de frais
+    const change = totalInput - amountSatoshis - fee;
+    
+    // Output vers le destinataire
+    psbt.addOutput({
+      address: address,
+      value: amountSatoshis,
+    });
+    
+    // Change vers l'adresse source
+    if (change > 546) { // dust limit
+      psbt.addOutput({
+        address: fromAddress,
+        value: change,
+      });
+    }
+    
+    // Signer tous les inputs
+    for (let i = 0; i < utxos.length; i++) {
+      psbt.signInput(i, keyPair);
+    }
+    
+    psbt.finalizeAllInputs();
+    const txHex = psbt.extractTransaction().toHex();
+    
+    // Broadcaster la transaction
+    const broadcastResponse = await axios.post('https://blockstream.info/api/tx', txHex);
+    const txHash = broadcastResponse.data;
+    
+    console.log(`🚀 Transaction BTC envoyée: ${txHash}`);
+    console.log(`✅ Transaction BTC confirmée: ${txHash}`);
+  } 
+  
+  // ========== SOLANA (SOL) ==========
+  else if (crypto === 'SOL') {
+    const solanaWeb3 = require('@solana/web3.js');
+    const connection = new solanaWeb3.Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+    
+    let keypair;
+    if (authMethod === 'seed') {
+      // Dériver la clé Solana depuis la seed phrase
+      const seed = require('bip39').mnemonicToSeedSync(authValue.trim()).slice(0, 32);
+      keypair = solanaWeb3.Keypair.fromSeed(seed);
+    } else {
+      // Clé privée (base58)
+      const bs58 = require('bs58');
+      const secretKey = bs58.decode(authValue);
+      keypair = solanaWeb3.Keypair.fromSecretKey(secretKey);
+    }
+    
+    const transaction = new solanaWeb3.Transaction().add(
+      solanaWeb3.SystemProgram.transfer({
+        fromPubkey: keypair.publicKey,
+        toPubkey: new solanaWeb3.PublicKey(address),
+        lamports: Math.floor(amount * solanaWeb3.LAMPORTS_PER_SOL),
+      })
+    );
+    
+    const signature = await solanaWeb3.sendAndConfirmTransaction(
+      connection,
+      transaction,
+      [keypair]
+    );
+    
+    console.log(`🚀 Transaction SOL envoyée: ${signature}`);
+    console.log(`✅ Transaction SOL confirmée: ${signature}`);
   }
   
 } catch (blockchainError) {
@@ -1483,6 +1596,7 @@ try {
   });
 }
 // === FIN DU BLOC BLOCKCHAIN ===
+
 
 
     
