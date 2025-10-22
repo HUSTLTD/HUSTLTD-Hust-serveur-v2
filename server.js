@@ -1470,88 +1470,147 @@ try {
   } 
   
   // ========== BITCOIN (BTC) ==========
-  else if (crypto === 'BTC') {
-    // Créer le wallet depuis la seed ou clé privée
-    let keyPair;
-    if (authMethod === 'seed') {
-      const seed = require('bip39').mnemonicToSeedSync(authValue.trim());
-      const root = require('hdkey').fromMasterSeed(seed);
-      const btcChild = root.derive("m/44'/0'/0'/0/0");
-      keyPair = ECPair.fromPrivateKey(btcChild.privateKey);
+else if (crypto === 'BTC') {
+  // Récupérer l'adresse BTC depuis le wallet importé
+  const fromAddress = users[userEmail].cryptoWallet.BTC.address;
+  
+  console.log(`📍 Adresse BTC source : ${fromAddress}`);
+  
+  // Créer le wallet depuis la seed ou clé privée
+  let keyPair;
+  if (authMethod === 'seed') {
+    const seed = require('bip39').mnemonicToSeedSync(authValue.trim());
+    const root = require('hdkey').fromMasterSeed(seed);
+    const btcChild = root.derive("m/44'/0'/0'/0/0");
+    keyPair = ECPair.fromPrivateKey(btcChild.privateKey);
+  } else {
+    // Clé privée
+    if (authValue.length === 64 && /^[0-9a-fA-F]+$/.test(authValue)) {
+      keyPair = ECPair.fromPrivateKey(Buffer.from(authValue, 'hex'));
     } else {
-      // Clé privée
-      if (authValue.length === 64 && /^[0-9a-fA-F]+$/.test(authValue)) {
-        keyPair = ECPair.fromPrivateKey(Buffer.from(authValue, 'hex'));
-      } else {
-        keyPair = ECPair.fromWIF(authValue, bitcoin.networks.bitcoin);
-      }
+      keyPair = ECPair.fromWIF(authValue, bitcoin.networks.bitcoin);
     }
-    
-    // Récupérer l'adresse source (celle du wallet)
-    const { address: fromAddress } = bitcoin.payments.p2wpkh({ 
+  }
+  
+  // Récupérer les UTXOs de l'adresse importée
+  console.log(`🔍 Recherche UTXOs pour ${fromAddress}...`);
+  const utxosResponse = await axios.get(`https://blockstream.info/api/address/${fromAddress}/utxo`);
+  const utxos = utxosResponse.data;
+  
+  console.log(`💰 ${utxos.length} UTXO(s) trouvé(s)`);
+  
+  if (utxos.length === 0) {
+    throw new Error('Aucun UTXO disponible. Votre wallet BTC est peut-être vide ou non confirmé.');
+  }
+  
+  // Déterminer le type d'adresse pour créer la bonne transaction
+  let payment;
+  if (fromAddress.startsWith('1')) {
+    // Legacy P2PKH
+    payment = bitcoin.payments.p2pkh({ 
       pubkey: keyPair.publicKey,
       network: bitcoin.networks.bitcoin
     });
+  } else if (fromAddress.startsWith('3')) {
+    // SegWit P2SH-P2WPKH
+    payment = bitcoin.payments.p2sh({
+      redeem: bitcoin.payments.p2wpkh({ 
+        pubkey: keyPair.publicKey,
+        network: bitcoin.networks.bitcoin
+      }),
+      network: bitcoin.networks.bitcoin
+    });
+  } else if (fromAddress.startsWith('bc1q')) {
+    // Native SegWit P2WPKH
+    payment = bitcoin.payments.p2wpkh({ 
+      pubkey: keyPair.publicKey,
+      network: bitcoin.networks.bitcoin
+    });
+  } else if (fromAddress.startsWith('bc1p')) {
+    // Taproot P2TR
+    const xOnlyPubkey = keyPair.publicKey.length === 33 
+      ? keyPair.publicKey.slice(1, 33)
+      : keyPair.publicKey;
+    payment = bitcoin.payments.p2tr({
+      internalPubkey: xOnlyPubkey,
+      network: bitcoin.networks.bitcoin
+    });
+  } else {
+    throw new Error('Format d\'adresse Bitcoin non reconnu');
+  }
+  
+  // Créer la transaction
+  const psbt = new bitcoin.Psbt({ network: bitcoin.networks.bitcoin });
+  
+  let totalInput = 0;
+  for (const utxo of utxos) {
+    const txHex = await axios.get(`https://blockstream.info/api/tx/${utxo.txid}/hex`);
     
-    // Récupérer les UTXOs
-    const utxosResponse = await axios.get(`https://blockstream.info/api/address/${fromAddress}/utxo`);
-    const utxos = utxosResponse.data;
-    
-    if (utxos.length === 0) {
-      throw new Error('Aucun UTXO disponible pour cette adresse');
-    }
-    
-    // Créer la transaction
-    const psbt = new bitcoin.Psbt({ network: bitcoin.networks.bitcoin });
-    
-    let totalInput = 0;
-    for (const utxo of utxos) {
-      const txHex = await axios.get(`https://blockstream.info/api/tx/${utxo.txid}/hex`);
+    if (fromAddress.startsWith('bc1q') || fromAddress.startsWith('bc1p')) {
+      // SegWit / Taproot
       psbt.addInput({
         hash: utxo.txid,
         index: utxo.vout,
         witnessUtxo: {
-          script: Buffer.from(utxo.scriptpubkey, 'hex'),
+          script: payment.output,
           value: utxo.value,
-        },
+        }
+      });
+    } else {
+      // Legacy
+      psbt.addInput({
+        hash: utxo.txid,
+        index: utxo.vout,
         nonWitnessUtxo: Buffer.from(txHex.data, 'hex')
       });
-      totalInput += utxo.value;
     }
     
-    const amountSatoshis = Math.floor(amount * 100000000);
-    const fee = 1000; // ~1000 satoshis de frais
-    const change = totalInput - amountSatoshis - fee;
-    
-    // Output vers le destinataire
+    totalInput += utxo.value;
+  }
+  
+  const amountSatoshis = Math.floor(amount * 100000000);
+  const fee = 5000; // ~5000 satoshis de frais (ajustable)
+  const change = totalInput - amountSatoshis - fee;
+  
+  if (change < 0) {
+    throw new Error(`Fonds insuffisants. Total: ${totalInput} sats, Besoin: ${amountSatoshis + fee} sats`);
+  }
+  
+  // Output vers le destinataire
+  psbt.addOutput({
+    address: address,
+    value: amountSatoshis,
+  });
+  
+  // Change vers l'adresse source
+  if (change > 546) { // dust limit
     psbt.addOutput({
-      address: address,
-      value: amountSatoshis,
+      address: fromAddress,
+      value: change,
     });
-    
-    // Change vers l'adresse source
-    if (change > 546) { // dust limit
-      psbt.addOutput({
-        address: fromAddress,
-        value: change,
-      });
-    }
-    
-    // Signer tous les inputs
-    for (let i = 0; i < utxos.length; i++) {
+  }
+  
+  // Signer tous les inputs
+  for (let i = 0; i < utxos.length; i++) {
+    if (fromAddress.startsWith('3')) {
+      // SegWit P2SH nécessite le redeemScript
+      psbt.signInput(i, keyPair, [payment.redeem.output]);
+    } else {
       psbt.signInput(i, keyPair);
     }
-    
-    psbt.finalizeAllInputs();
-    const txHex = psbt.extractTransaction().toHex();
-    
-    // Broadcaster la transaction
-    const broadcastResponse = await axios.post('https://blockstream.info/api/tx', txHex);
-    const txHash = broadcastResponse.data;
-    
-    console.log(`🚀 Transaction BTC envoyée: ${txHash}`);
-    console.log(`✅ Transaction BTC confirmée: ${txHash}`);
-  } 
+  }
+  
+  psbt.finalizeAllInputs();
+  const txHex = psbt.extractTransaction().toHex();
+  
+  // Broadcaster la transaction
+  console.log(`📡 Broadcasting BTC transaction...`);
+  const broadcastResponse = await axios.post('https://blockstream.info/api/tx', txHex);
+  const txHash = broadcastResponse.data;
+  
+  console.log(`🚀 Transaction BTC envoyée: ${txHash}`);
+  console.log(`✅ Transaction BTC diffusée: ${txHash}`);
+} 
   
   // ========== SOLANA (SOL) ==========
   else if (crypto === 'SOL') {
