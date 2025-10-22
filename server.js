@@ -1593,16 +1593,45 @@ else if (crypto === 'BTC') {
   // Signer tous les inputs
 for (let i = 0; i < utxos.length; i++) {
   if (fromAddress.startsWith('bc1p')) {
-    // Taproot nécessite un tweaked signer
-    const tweakedSigner = keyPair.tweak(
-      bitcoin.crypto.taggedHash('TapTweak', payment.internalPubkey)
-    );
-    psbt.signInput(i, tweakedSigner);
+    // ========== TAPROOT (bc1p...) ==========
+    const xOnlyPubkey = keyPair.publicKey.length === 33 
+      ? keyPair.publicKey.slice(1, 33)
+      : keyPair.publicKey;
+    
+    const tweakHash = bitcoin.crypto.taggedHash('TapTweak', xOnlyPubkey);
+    
+    const privateKeyBigInt = BigInt('0x' + keyPair.privateKey.toString('hex'));
+    const tweakBigInt = BigInt('0x' + tweakHash.toString('hex'));
+    const n = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
+    
+    const tweakedPrivateKeyBigInt = (privateKeyBigInt + tweakBigInt) % n;
+    const tweakedPrivateKey = Buffer.from(tweakedPrivateKeyBigInt.toString(16).padStart(64, '0'), 'hex');
+    
+    const tweakedKeyPair = ECPair.fromPrivateKey(tweakedPrivateKey, { network: bitcoin.networks.bitcoin });
+    
+    psbt.signInput(i, tweakedKeyPair);
+    
   } else if (fromAddress.startsWith('3')) {
-    // SegWit P2SH nécessite le redeemScript
+    // ========== NESTED SEGWIT P2SH (3...) ==========
+    // Pour P2SH, on peut avoir besoin du redeemScript
+    // Mais pour simplifier, on tente d'abord sans
+    try {
+      psbt.signInput(i, keyPair);
+    } catch (e) {
+      // Si ça échoue, essayer avec le redeemScript
+      if (payment.redeem && payment.redeem.output) {
+        psbt.signInput(i, keyPair, [payment.redeem.output]);
+      } else {
+        throw e;
+      }
+    }
+    
+  } else if (fromAddress.startsWith('bc1q')) {
+    // ========== NATIVE SEGWIT (bc1q...) ==========
     psbt.signInput(i, keyPair);
+    
   } else {
-    // Legacy et Native SegWit
+    // ========== LEGACY (1...) ==========
     psbt.signInput(i, keyPair);
   }
 }
