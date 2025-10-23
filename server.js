@@ -1644,6 +1644,52 @@ for (let i = 0; i < utxos.length; i++) {
   
   console.log(`🚀 Transaction BTC envoyée: ${txHash}`);
   console.log(`✅ Transaction BTC diffusée: ${txHash}`);
+
+  // === MISE À JOUR DU SOLDE BTC ===
+await new Promise(resolve => setTimeout(resolve, 2000));
+
+console.log(`🔄 Récupération du nouveau solde BTC...`);
+const balanceResponse = await axios.get(`https://blockstream.info/api/address/${fromAddress}`);
+const newBalanceSatoshis = balanceResponse.data.chain_stats.funded_txo_sum - balanceResponse.data.chain_stats.spent_txo_sum;
+const newBalanceBTC = newBalanceSatoshis / 100000000;
+
+const prices = await fetchCryptoPrices();
+const newBalanceEUR = newBalanceBTC * (prices.BTC || 0);
+
+users[userEmail].cryptoWallet.BTC.balance = newBalanceBTC;
+users[userEmail].cryptoWallet.BTC.balanceEUR = newBalanceEUR;
+
+let newTotalValue = 0;
+for (const [cryptoKey, data] of Object.entries(users[userEmail].cryptoWallet)) {
+  if (cryptoKey !== 'totalValue' && cryptoKey !== 'lastUpdated' && data.balanceEUR) {
+    newTotalValue += data.balanceEUR;
+  }
+}
+
+users[userEmail].cryptoWallet.totalValue = newTotalValue;
+users[userEmail].cryptoWallet.lastUpdated = new Date().toISOString();
+
+const cashBalance = users[userEmail].cashBalance || 0;
+users[userEmail].balance = cashBalance + newTotalValue;
+users[userEmail].lastUpdated = new Date().toISOString();
+
+await writeDataSafe(users);
+
+console.log(`✅ Retrait crypto: ${amount} ${crypto} vers ${address} pour ${email}`);
+
+res.json({
+  success: true,
+  message: 'Retrait effecté',
+  user: users[userEmail],
+  transaction: {
+    crypto,
+    amount,
+    address,
+    timestamp: new Date().toISOString()
+  }
+});
+
+return;
 } 
   
   // ========== SOLANA (SOL) ==========
