@@ -1324,7 +1324,7 @@ app.get('/api/refresh-crypto/:email', async (req, res) => {
       return res.json({ success: true, balances: {}, totalValue: 0 });
     }
     
-    const newBalances = await fetchAllCryptoBalances(addresses);
+    
     
     // 🔥 RÉCUPÉRER LES PRIX EN TEMPS RÉEL
     const prices = await fetchCryptoPrices();
@@ -1333,19 +1333,63 @@ app.get('/api/refresh-crypto/:email', async (req, res) => {
     const newCryptoWallet = {};
     let newTotalValue = 0;
     
+   // 🆕 REMPLACEZ LA BOUCLE PAR LE NOUVEAU CODE ICI
     for (const [crypto, address] of Object.entries(addresses)) {
-      const balance = newBalances[crypto] || 0;
-      const balanceEUR = balance * (prices[crypto] || 0);
-      
-      newCryptoWallet[crypto] = {
-        address: address,
-        balance: balance,
-        balanceEUR: balanceEUR
-      };
-      
-      newTotalValue += balanceEUR;
+      try {
+        let realBalance = 0;
+        
+        if (crypto === 'BTC') {
+          console.log(`🔍 Interrogation blockchain BTC pour ${address}...`);
+          const balanceResponse = await axios.get(`https://blockstream.info/api/address/${address}`);
+          const balanceSatoshis = balanceResponse.data.chain_stats.funded_txo_sum - balanceResponse.data.chain_stats.spent_txo_sum;
+          realBalance = balanceSatoshis / 100000000;
+          
+        } else if (crypto === 'ETH') {
+          console.log(`🔍 Interrogation blockchain ETH pour ${address}...`);
+          const provider = new ethers.providers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
+          const balanceWei = await provider.getBalance(address);
+          realBalance = parseFloat(ethers.utils.formatEther(balanceWei));
+          
+        } else if (crypto === 'USDT') {
+          console.log(`🔍 Interrogation blockchain USDT pour ${address}...`);
+          const provider = new ethers.providers.JsonRpcProvider('https://mainnet.infura.io/v3/72e674d2f4884e8fa2d1c894aa1ba712');
+          const USDT_CONTRACT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
+          const USDT_ABI = ['function balanceOf(address) view returns (uint256)'];
+          const contract = new ethers.Contract(USDT_CONTRACT, USDT_ABI, provider);
+          const balanceRaw = await contract.balanceOf(address);
+          realBalance = parseFloat(ethers.utils.formatUnits(balanceRaw, 6));
+          
+        } else if (crypto === 'SOL') {
+          console.log(`🔍 Interrogation blockchain SOL pour ${address}...`);
+          const solanaWeb3 = require('@solana/web3.js');
+          const connection = new solanaWeb3.Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+          const publicKey = new solanaWeb3.PublicKey(address);
+          const balanceLamports = await connection.getBalance(publicKey);
+          realBalance = balanceLamports / solanaWeb3.LAMPORTS_PER_SOL;
+        }
+        
+        const balanceEUR = realBalance * (prices[crypto] || 0);
+        
+        newCryptoWallet[crypto] = {
+          address: address,
+          balance: realBalance,
+          balanceEUR: balanceEUR
+        };
+        
+        newTotalValue += balanceEUR;
+        
+        console.log(`✅ ${crypto}: ${realBalance} (${balanceEUR.toFixed(2)}€)`);
+        
+      } catch (error) {
+        console.error(`❌ Erreur refresh ${crypto}:`, error.message);
+        newCryptoWallet[crypto] = {
+          address: address,
+          balance: 0,
+          balanceEUR: 0
+        };
+      }
     }
-    
+
     newCryptoWallet.totalValue = newTotalValue;
     newCryptoWallet.lastUpdated = new Date().toISOString();
     
