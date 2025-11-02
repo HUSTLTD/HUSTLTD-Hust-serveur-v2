@@ -1840,15 +1840,334 @@ return;
 
 
 
+// ============================================================================
+// 🔄 ROUTES SWAP - Conversion crypto → HUST Balance
+// ============================================================================
+
+// Route 1: Obtenir l'adresse de dépôt pour un swap
+app.post('/api/swap-address', (req, res) => {
+  try {
+    const { crypto } = req.body;
+    
+    // ✅ ADRESSES DE RÉCEPTION HUST (PERMANENTES)
+    const HUST_WALLETS = {
+      'BTC': 'bc1q8x3hj2w6av3hftsjqm3ytjp5gqrld4569sn8qt',
+      'ETH': '0xbDf53b67BE24D3aC79f05CC5b6C84456EfD3d1C8',
+      'SOL': 'HJehAibVqNn5cuUJLAVHwmMxw5rxTvWQawWFSZ9cGzFa',
+      'USDT': '0xbDf53b67BE24D3aC79f05CC5b6C84456EfD3d1C8'
+    };
+    
+    if (!HUST_WALLETS[crypto]) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Crypto non supportée' 
+      });
+    }
+    
+    console.log(`📬 Adresse swap demandée pour ${crypto}`);
+    
+    res.json({ 
+      success: true,
+      address: HUST_WALLETS[crypto],
+      estimatedTime: crypto === 'BTC' ? '30-60 minutes' : '10-30 minutes',
+      minimumAmount: crypto === 'BTC' ? 0.0001 : crypto === 'ETH' ? 0.001 : 0.01
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur swap-address:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route 2: Enregistrer un swap en attente
+app.post('/api/swap-pending', async (req, res) => {
+  try {
+    const { 
+      userEmail, 
+      userName, 
+      crypto, 
+      amount, 
+      hustAmount, 
+      txHash, 
+      timestamp,
+      depositAddress 
+    } = req.body;
+    
+    console.log(`🔄 Nouveau swap en attente:`, {
+      userEmail,
+      crypto,
+      amount,
+      hustAmount,
+      txHash
+    });
+    
+    const users = await readData();
+    const userEmailLower = userEmail.toLowerCase();
+    
+    if (!users[userEmailLower]) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Utilisateur non trouvé' 
+      });
+    }
+    
+    if (!users[userEmailLower].pendingSwaps) {
+      users[userEmailLower].pendingSwaps = [];
+    }
+    
+    const swapData = {
+      id: `swap_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      crypto,
+      amount: parseFloat(amount),
+      hustAmount: parseFloat(hustAmount),
+      txHash: txHash || 'pending',
+      depositAddress,
+      status: 'pending',
+      timestamp: timestamp || new Date().toISOString(),
+      confirmations: 0,
+      requiredConfirmations: crypto === 'BTC' ? 3 : 12
+    };
+    
+    users[userEmailLower].pendingSwaps.push(swapData);
+    users[userEmailLower].lastUpdated = new Date().toISOString();
+    
+    await writeDataSafe(users);
+    
+    console.log(`✅ Swap enregistré pour ${userEmail}: ${amount} ${crypto} → ${hustAmount}€`);
+    
+    res.json({ 
+      success: true,
+      swapId: swapData.id,
+      message: 'Swap enregistré avec succès',
+      swap: swapData
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur swap-pending:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route 3: Confirmer un swap
+app.post('/api/swap-confirm', async (req, res) => {
+  try {
+    const { userEmail, swapId, txHash } = req.body;
+    
+    const users = await readData();
+    const userEmailLower = userEmail.toLowerCase();
+    
+    if (!users[userEmailLower] || !users[userEmailLower].pendingSwaps) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Utilisateur ou swap non trouvé' 
+      });
+    }
+    
+    const swapIndex = users[userEmailLower].pendingSwaps.findIndex(s => s.id === swapId);
+    if (swapIndex === -1) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Swap non trouvé' 
+      });
+    }
+    
+    const swap = users[userEmailLower].pendingSwaps[swapIndex];
+    
+    swap.status = 'confirmed';
+    swap.txHash = txHash || swap.txHash;
+    swap.confirmedAt = new Date().toISOString();
+    
+    const currentBalance = users[userEmailLower].balance || 0;
+    const currentCashBalance = users[userEmailLower].cashBalance || 0;
+    
+    users[userEmailLower].balance = currentBalance + swap.hustAmount;
+    users[userEmailLower].cashBalance = currentCashBalance + swap.hustAmount;
+    users[userEmailLower].lastUpdated = new Date().toISOString();
+    
+    swap.status = 'completed';
+    swap.completedAt = new Date().toISOString();
+    
+    await writeDataSafe(users);
+    
+    console.log(`✅ Swap confirmé pour ${userEmail}: +${swap.hustAmount}€ HUST Balance`);
+    
+    res.json({ 
+      success: true,
+      message: 'Swap confirmé et HUST Balance crédité',
+      newBalance: users[userEmailLower].balance,
+      swap
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur swap-confirm:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route 4: Obtenir l'historique des swaps
+app.get('/api/swap-history/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    const users = await readData();
+    const userEmailLower = email.toLowerCase();
+    
+    if (!users[userEmailLower]) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Utilisateur non trouvé' 
+      });
+    }
+    
+    const pendingSwaps = users[userEmailLower].pendingSwaps || [];
+    
+    res.json({ 
+      success: true,
+      swaps: pendingSwaps
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur swap-history:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route 5: Swap instantané avec crédit automatique du HUST Balance
+app.post('/api/swap-instant', async (req, res) => {
+  try {
+    const { 
+      userEmail, 
+      userName, 
+      crypto, 
+      amount, 
+      hustAmount, 
+      txHash, 
+      depositAddress,
+      timestamp 
+    } = req.body;
+    
+    console.log(`⚡ Swap instantané: ${amount} ${crypto} → ${hustAmount}€ HUST Balance`);
+    
+    const users = await readData();
+    const userEmailLower = userEmail.toLowerCase();
+    
+    if (!users[userEmailLower]) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Utilisateur non trouvé' 
+      });
+    }
+    
+    // Enregistrer dans l'historique des swaps
+    if (!users[userEmailLower].swapHistory) {
+      users[userEmailLower].swapHistory = [];
+    }
+    
+    const swapRecord = {
+      id: `swap_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      crypto,
+      amount: parseFloat(amount),
+      hustAmount: parseFloat(hustAmount),
+      txHash,
+      depositAddress,
+      status: 'completed',
+      timestamp: timestamp || new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    };
+    
+    users[userEmailLower].swapHistory.push(swapRecord);
+    
+    // CRÉDITER LE HUST BALANCE IMMÉDIATEMENT
+    const currentBalance = users[userEmailLower].balance || 0;
+    const currentCashBalance = users[userEmailLower].cashBalance || 0;
+    
+    users[userEmailLower].balance = currentBalance + parseFloat(hustAmount);
+    users[userEmailLower].cashBalance = currentCashBalance + parseFloat(hustAmount);
+    users[userEmailLower].lastUpdated = new Date().toISOString();
+    
+    // Sauvegarder
+    await writeDataSafe(users);
+    
+    console.log(`✅ HUST Balance crédité: ${userEmail} +${hustAmount}€ (Nouveau: ${users[userEmailLower].balance.toFixed(2)}€)`);
+    
+    res.json({ 
+      success: true,
+      message: 'Swap complété et HUST Balance crédité',
+      newBalance: users[userEmailLower].balance,
+      user: users[userEmailLower],
+      swap: swapRecord
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur swap-instant:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 
 
-
-
-
-
-
-
+// Route pour gérer les transferts (HUST, bancaire, crypto)
+app.post('/api/transfer', async (req, res) => {
+  try {
+    const { 
+      senderEmail, 
+      recipientEmail, 
+      amount, 
+      type,
+      details 
+    } = req.body;
+    
+    console.log(`💸 Transfert: ${amount}€ de ${senderEmail} (type: ${type})`);
+    
+    const users = await readData();
+    const senderEmailLower = senderEmail.toLowerCase();
+    
+    if (!users[senderEmailLower]) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Expéditeur non trouvé' 
+      });
+    }
+    
+    if (users[senderEmailLower].cashBalance < amount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Solde insuffisant' 
+      });
+    }
+    
+    users[senderEmailLower].cashBalance -= amount;
+    users[senderEmailLower].lastUpdated = new Date().toISOString();
+    
+    if (type === 'hust' && recipientEmail) {
+      const recipientEmailLower = recipientEmail.toLowerCase();
+      
+      if (!users[recipientEmailLower]) {
+        return res.status(404).json({ 
+          success: false, 
+          error: 'Destinataire non trouvé' 
+        });
+      }
+      
+      users[recipientEmailLower].cashBalance += amount;
+      users[recipientEmailLower].lastUpdated = new Date().toISOString();
+    }
+    
+    await writeDataSafe(users);
+    
+    console.log(`✅ Transfert réussi: ${senderEmail} -${amount}€`);
+    
+    res.json({ 
+      success: true,
+      message: 'Transfert effectué',
+      sender: users[senderEmailLower],
+      recipient: recipientEmail ? users[recipientEmail.toLowerCase()] : null
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur transfert:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 
 
