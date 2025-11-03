@@ -2160,7 +2160,9 @@ app.post('/api/transfer', async (req, res) => {
       success: true,
       message: 'Transfert effectué',
       sender: users[senderEmailLower],
-      recipient: recipientEmail ? users[recipientEmail.toLowerCase()] : null
+      recipient: recipientEmail && users[recipientEmail.toLowerCase()] 
+        ? users[recipientEmail.toLowerCase()] 
+        : null
     });
     
   } catch (error) {
