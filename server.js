@@ -2138,6 +2138,25 @@ app.post('/api/transfer', async (req, res) => {
     users[senderEmailLower].cashBalance -= amount;
     users[senderEmailLower].lastUpdated = new Date().toISOString();
     
+
+    // 🆕 Initialiser transactionHistory si n'existe pas
+    if (!users[senderEmailLower].transactionHistory) {
+      users[senderEmailLower].transactionHistory = [];
+    }
+    
+    // 🆕 Créer la transaction pour l'expéditeur (montant négatif)
+    const senderTransaction = {
+      id: Date.now(),
+      date: new Date().toISOString(),
+      type: type,
+      amount: -amount,
+      ...details
+    };
+    
+    // 🆕 Ajouter au début de l'historique
+    users[senderEmailLower].transactionHistory.unshift(senderTransaction);
+    
+  
     if (type === 'hust' && recipientEmail) {
       const recipientEmailLower = recipientEmail.toLowerCase();
       
@@ -2150,11 +2169,31 @@ app.post('/api/transfer', async (req, res) => {
       
       users[recipientEmailLower].cashBalance += amount;
       users[recipientEmailLower].lastUpdated = new Date().toISOString();
+    
+    // 🆕 Initialiser transactionHistory du destinataire si n'existe pas
+      if (!users[recipientEmailLower].transactionHistory) {
+        users[recipientEmailLower].transactionHistory = [];
+      }
+       
+
+      // 🆕 Créer la transaction pour le destinataire (montant positif)
+      const recipientTransaction = {
+        id: Date.now() + 1,
+        date: new Date().toISOString(),
+        type: 'hust',
+        amount: amount,
+        sender: users[senderEmailLower].fullName || senderEmail
+      };
+      
+      // 🆕 Ajouter au début de l'historique
+      users[recipientEmailLower].transactionHistory.unshift(recipientTransaction);
     }
+    
     
     await writeDataSafe(users);
     
     console.log(`✅ Transfert réussi: ${senderEmail} -${amount}€`);
+    console.log(`📝 Transaction sauvegardée dans l'historique`);
     
     res.json({ 
       success: true,
