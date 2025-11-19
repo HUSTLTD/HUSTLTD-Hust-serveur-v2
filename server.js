@@ -2155,7 +2155,11 @@ app.post('/api/transfer', async (req, res) => {
     
     // 🆕 Ajouter au début de l'historique
     users[senderEmailLower].transactionHistory.unshift(senderTransaction);
-    
+   
+    // 🆕 Limiter à 50 transactions max
+    if (users[senderEmailLower].transactionHistory.length > 50) {
+    users[senderEmailLower].transactionHistory = users[senderEmailLower].transactionHistory.slice(0, 50);
+    }
   
     if (type === 'hust' && recipientEmail) {
       const recipientEmailLower = recipientEmail.toLowerCase();
@@ -2187,8 +2191,12 @@ app.post('/api/transfer', async (req, res) => {
       
       // 🆕 Ajouter au début de l'historique
       users[recipientEmailLower].transactionHistory.unshift(recipientTransaction);
-    }
     
+      // 🆕 Limiter à 50 transactions max
+      if (users[recipientEmailLower].transactionHistory.length > 50) {
+      users[recipientEmailLower].transactionHistory = users[recipientEmailLower].transactionHistory.slice(0, 50);
+      }
+    }
     
     await writeDataSafe(users);
     
