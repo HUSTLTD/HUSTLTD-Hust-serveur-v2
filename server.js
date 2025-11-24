@@ -76,6 +76,109 @@ const readData = async () => {
 
 
 
+// Fonction de calcul des intérêts composés journaliers
+const calculateDailyInterest = (user) => {
+  const now = new Date();
+  const lastUpdate = user.lastInterestUpdate ? new Date(user.lastInterestUpdate) : new Date(user.creationDate || now);
+  
+  // Calculer les jours écoulés
+  const daysDiff = Math.floor((now - lastUpdate) / (1000 * 60 * 60 * 24));
+  
+  if (daysDiff === 0) return user; // Pas de changement si même jour
+  
+  const dailyRate = (user.interestRate || 0.05) / 365; // Taux journalier
+  let updatedBalance = user.cashBalance || 0;
+  let monthInterest = user.currentMonthInterest || 0;
+  const history = user.interestHistory || [];
+  
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const lastUpdateMonth = lastUpdate.getMonth();
+  const lastUpdateYear = lastUpdate.getFullYear();
+  
+  let monthChanged = false;
+  let interestsToCredit = 0;
+  
+  // Calculer les intérêts pour chaque jour écoulé EN PREMIER
+  for (let i = 0; i < daysDiff; i++) {
+    const interestDate = new Date(lastUpdate);
+    interestDate.setDate(interestDate.getDate() + i + 1);
+    
+    const dayMonth = interestDate.getMonth();
+    const dayYear = interestDate.getFullYear();
+    
+    // Si on change de mois pendant la boucle
+    if ((dayMonth !== lastUpdateMonth || dayYear !== lastUpdateYear) && !monthChanged) {
+      // Sauvegarder les intérêts du mois précédent
+      interestsToCredit = monthInterest;
+      monthChanged = true;
+      
+      // Créditer dans le balance
+      updatedBalance += interestsToCredit;
+      
+      // Ajouter transaction
+      const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 
+                          'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+      const lastMonthName = monthNames[lastUpdateMonth];
+      
+      if (!user.transactions) user.transactions = [];
+      user.transactions.unshift({
+        id: `interest-${lastUpdateYear}-${lastUpdateMonth}`,
+        type: 'credit',
+        amount: interestsToCredit,
+        description: `Intérêts du mois de ${lastMonthName} ${lastUpdateYear}`,
+        date: new Date(dayYear, dayMonth, 1).toISOString(),
+        status: 'completed'
+      });
+      
+      // Réinitialiser pour le nouveau mois
+      monthInterest = 0;
+    }
+    
+    // Calculer l'intérêt du jour (avec le balance éventuellement mis à jour)
+    const dayInterest = updatedBalance * dailyRate;
+    monthInterest += dayInterest;
+    
+    // Ajouter à l'historique
+    history.push({
+      date: interestDate.toISOString(),
+      amount: dayInterest,
+      balance: updatedBalance
+    });
+  }
+  
+  // Limiter l'historique à 365 jours
+  if (history.length > 365) {
+    history.splice(0, history.length - 365);
+  }
+  
+  return {
+    ...user,
+    cashBalance: updatedBalance,
+    currentMonthInterest: monthInterest,
+    monthlyInterest: monthInterest,
+    lastInterestUpdate: now.toISOString(),
+    interestHistory: history
+  };
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 async function deriveAllAddressesFromSeed(seedPhrase) {
@@ -469,9 +572,20 @@ app.get('/api/users/:email', async (req, res) => {
     const email = req.params.email.toLowerCase();
     
     if (users[email]) {
+      // 🆕 Calculer les intérêts avant de renvoyer l'utilisateur
+      const userWithInterest = calculateDailyInterest(users[email]);
+      
+      // 🆕 Sauvegarder si des intérêts ont été calculés
+      if (userWithInterest.cashBalance !== users[email].cashBalance || 
+          userWithInterest.currentMonthInterest !== users[email].currentMonthInterest) {
+        users[email] = userWithInterest;
+        await writeDataSafe(users);
+        console.log(`✅ Intérêts calculés pour ${email}: +${userWithInterest.currentMonthInterest.toFixed(2)}€`);
+      }
+      
       res.json({
         success: true,
-        user: users[email]
+        user: userWithInterest
       });
     } else {
       res.status(404).json({
@@ -2217,6 +2331,71 @@ app.post('/api/transfer', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+
+
+
+
+
+
+// 🕐 Système automatique de calcul des intérêts à 2h du matin (heure française)
+const scheduleInterestCalculation = () => {
+  const checkAndCalculate = async () => {
+    const now = new Date();
+    
+    // Convertir en heure française (UTC+1 en hiver, UTC+2 en été)
+    const frenchTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+    const hour = frenchTime.getHours();
+    const minute = frenchTime.getMinutes();
+    
+    // Exécuter à 2h du matin (entre 2h00 et 2h05 pour avoir une marge)
+    if (hour === 2 && minute < 5) {
+      console.log('🕐 Calcul automatique des intérêts à 2h du matin...');
+      
+      try {
+        const users = await readData();
+        let updatedCount = 0;
+        
+        for (const email in users) {
+          const user = users[email];
+          
+          // Ne calculer que si l'utilisateur a un cashBalance
+          if (user.cashBalance && user.cashBalance > 0) {
+            const userWithInterest = calculateDailyInterest(user);
+            
+            // Si des changements ont été faits
+            if (userWithInterest.cashBalance !== user.cashBalance || 
+                userWithInterest.currentMonthInterest !== user.currentMonthInterest) {
+              users[email] = userWithInterest;
+              updatedCount++;
+              console.log(`  ✅ ${email}: +${(userWithInterest.currentMonthInterest - (user.currentMonthInterest || 0)).toFixed(2)}€`);
+            }
+          }
+        }
+        
+        if (updatedCount > 0) {
+          await writeDataSafe(users);
+          console.log(`🎉 ${updatedCount} utilisateur(s) mis à jour avec succès !`);
+        } else {
+          console.log('ℹ️ Aucun utilisateur à mettre à jour');
+        }
+      } catch (error) {
+        console.error('❌ Erreur lors du calcul automatique:', error);
+      }
+    }
+  };
+  
+  // Vérifier toutes les minutes si on est à 2h du matin
+  setInterval(checkAndCalculate, 60000); // Toutes les 60 secondes
+  console.log('✅ Système automatique de calcul des intérêts activé (2h du matin, heure française)');
+};
+
+// Démarrer le système automatique
+scheduleInterestCalculation();
+
+
+
+
 
 
 
