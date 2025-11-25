@@ -721,6 +721,42 @@ app.put('/api/users/:email/balance', async (req, res) => {
   }
 });
 
+// DELETE - Supprimer un utilisateur (fermer le compte)
+app.delete('/api/users/:email', async (req, res) => {
+  try {
+    const email = req.params.email.toLowerCase();
+    
+    const users = await readData();
+    
+    if (users[email]) {
+      // Supprimer l'utilisateur
+      delete users[email];
+      
+      const saved = await writeDataSafe(users);
+      
+      if (saved) {
+        console.log(`🗑️ Compte supprimé: ${email}`);
+        res.json({
+          success: true,
+          message: 'Compte fermé avec succès'
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          message: 'Erreur lors de la suppression'
+        });
+      }
+    } else {
+      res.status(404).json({
+        success: false,
+        message: 'Utilisateur non trouvé'
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // POST - Synchroniser tous les utilisateurs
 app.post('/api/sync', async (req, res) => {
   try {
