@@ -2545,7 +2545,7 @@ const applicantData = {
     // 2. Générer un access token pour cet applicant
     const tokenTimestamp = Math.floor(Date.now() / 1000).toString();
     const tokenMethod = 'POST';
-    const tokenUrl = `/resources/accessTokens?userId=${userId}&levelName=${levelName}`;
+    const tokenUrl = `/resources/accessTokens?userId=${encodeURIComponent(userId)}&levelName=${levelName}`;
     const tokenSignature = createSignature(tokenMethod, tokenUrl, tokenTimestamp);
 
     const tokenResponse = await axios({
