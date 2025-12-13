@@ -2544,20 +2544,27 @@ const applicantData = {
 
     // 2. Générer un access token pour cet applicant
     const tokenTimestamp = Math.floor(Date.now() / 1000).toString();
-    const tokenMethod = 'POST';
-    const tokenUrl = `/resources/accessTokens?userId=${encodeURIComponent(userId)}&levelName=${levelName}`;
-    const tokenSignature = createSignature(tokenMethod, tokenUrl, tokenTimestamp);
+const tokenMethod = 'POST';
+// URL pour la signature - SANS encodage
+const tokenUrl = `/resources/accessTokens?userId=${userId}&levelName=${levelName}`;
+const tokenSignature = createSignature(tokenMethod, tokenUrl, tokenTimestamp, '');
 
-    const tokenResponse = await axios({
-      method: 'POST',
-      url: `${SUMSUB_BASE_URL}${tokenUrl}`,
-      headers: {
-        'Accept': 'application/json',
-        'X-App-Token': SUMSUB_APP_TOKEN,
-        'X-App-Access-Sig': tokenSignature,
-        'X-App-Access-Ts': tokenTimestamp
-      }
-    });
+// Requête avec params séparés (axios encode automatiquement)
+const tokenResponse = await axios({
+  method: 'POST',
+  url: `${SUMSUB_BASE_URL}/resources/accessTokens`,
+  params: {
+    userId: userId,
+    levelName: levelName
+  },
+  headers: {
+    'Accept': 'application/json',
+    'X-App-Token': SUMSUB_APP_TOKEN,
+    'X-App-Access-Sig': tokenSignature,
+    'X-App-Access-Ts': tokenTimestamp
+  }
+  // PAS de data: {} - la requête ne doit pas avoir de body !
+});
 
     const accessToken = tokenResponse.data.token;
     console.log(`✅ Access token généré pour ${userId}`);
