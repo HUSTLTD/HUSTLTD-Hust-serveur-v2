@@ -2453,7 +2453,7 @@ function createSignature(method, url, timestamp, body = '') {
 // POST - Créer un access token pour un utilisateur
 app.post('/api/sumsub/token', async (req, res) => {
   try {
-    const { userId, levelName = 'idv-and-phone-verification' } = req.body;
+    const { userId, levelName = 'idv-and-phone-verification', userData } = req.body;
 
     if (!userId) {
       return res.status(400).json({ 
@@ -2462,36 +2462,67 @@ app.post('/api/sumsub/token', async (req, res) => {
       });
     }
 
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const method = 'POST';
-    const url = `/resources/applicants?levelName=${levelName}`;
-    
-    const applicantData = {
-      externalUserId: userId,
-      info: {
-        country: 'FRA'
+    let applicantId;
+
+    // 1. Essayer de créer un applicant avec les données user
+    try {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const method = 'POST';
+      const url = `/resources/applicants?levelName=${levelName}`;
+      
+      const applicantData = {
+        externalUserId: userId,
+        info: {
+          firstName: userData?.firstName || '',
+          lastName: userData?.lastName || '',
+          dob: userData?.dob || '',
+          country: userData?.country || 'FRA',
+          phone: userData?.phone || '',
+          addresses: userData?.addresses || []
+        },
+        email: userData?.email || userId
+      };
+
+      const body = JSON.stringify(applicantData);
+      const signature = createSignature(method, url, timestamp, body);
+
+      const applicantResponse = await axios({
+        method: 'POST',
+        url: `${SUMSUB_BASE_URL}${url}`,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'X-App-Token': SUMSUB_APP_TOKEN,
+          'X-App-Access-Sig': signature,
+          'X-App-Access-Ts': timestamp
+        },
+        data: applicantData
+      });
+
+      applicantId = applicantResponse.data.id;
+      console.log(`✅ Nouvel applicant créé: ${applicantId}`);
+
+    } catch (createError) {
+      // Si l'applicant existe déjà (code 409), on le récupère
+      if (createError.response?.status === 409) {
+        console.log(`ℹ️ Applicant existe déjà pour ${userId}, récupération...`);
+        
+        // Extraire l'ID de l'applicant du message d'erreur
+        const existingId = createError.response.data.description.match(/[a-f0-9]{24}/)?.[0];
+        
+        if (existingId) {
+          applicantId = existingId;
+          console.log(`✅ Applicant existant récupéré: ${applicantId}`);
+        } else {
+          throw new Error('Impossible de récupérer l\'ID de l\'applicant existant');
+        }
+      } else {
+        // Autre erreur, on la remonte
+        throw createError;
       }
-    };
+    }
 
-    const body = JSON.stringify(applicantData);
-    const signature = createSignature(method, url, timestamp, body);
-
-    const applicantResponse = await axios({
-      method: 'POST',
-      url: `${SUMSUB_BASE_URL}${url}`,
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'X-App-Token': SUMSUB_APP_TOKEN,
-        'X-App-Access-Sig': signature,
-        'X-App-Access-Ts': timestamp
-      },
-      data: applicantData
-    });
-
-    const applicantId = applicantResponse.data.id;
-    console.log(`✅ Applicant Sumsub créé: ${applicantId}`);
-
+    // 2. Générer un access token pour cet applicant
     const tokenTimestamp = Math.floor(Date.now() / 1000).toString();
     const tokenMethod = 'POST';
     const tokenUrl = `/resources/accessTokens?userId=${userId}&levelName=${levelName}`;
@@ -2509,7 +2540,7 @@ app.post('/api/sumsub/token', async (req, res) => {
     });
 
     const accessToken = tokenResponse.data.token;
-    console.log(`✅ Access token Sumsub généré pour ${userId}`);
+    console.log(`✅ Access token généré pour ${userId}`);
 
     res.json({
       success: true,
@@ -2526,8 +2557,6 @@ app.post('/api/sumsub/token', async (req, res) => {
     });
   }
 });
-
-console.log('✅ Routes Sumsub ajoutées');
 
 
 
