@@ -2545,25 +2545,28 @@ const applicantData = {
     // 2. Générer un access token pour cet applicant
     const tokenTimestamp = Math.floor(Date.now() / 1000).toString();
 const tokenMethod = 'POST';
-// URL pour la signature - SANS encodage
-const tokenUrl = `/resources/accessTokens?userId=${userId}&levelName=${levelName}`;
-const tokenSignature = createSignature(tokenMethod, tokenUrl, tokenTimestamp, '');
+const tokenUrl = `/resources/accessTokens/sdk`;
 
-// Requête avec params séparés (axios encode automatiquement)
+const tokenBody = {
+  userId: userId,
+  levelName: levelName,
+  ttlInSecs: 600
+};
+
+const tokenBodyString = JSON.stringify(tokenBody);
+const tokenSignature = createSignature(tokenMethod, tokenUrl, tokenTimestamp, tokenBodyString);
+
 const tokenResponse = await axios({
   method: 'POST',
-  url: `${SUMSUB_BASE_URL}/resources/accessTokens`,
-  params: {
-    userId: userId,
-    levelName: levelName
-  },
+  url: `${SUMSUB_BASE_URL}${tokenUrl}`,
   headers: {
     'Accept': 'application/json',
+    'Content-Type': 'application/json',
     'X-App-Token': SUMSUB_APP_TOKEN,
     'X-App-Access-Sig': tokenSignature,
     'X-App-Access-Ts': tokenTimestamp
-  }
-  // PAS de data: {} - la requête ne doit pas avoir de body !
+  },
+  data: tokenBody
 });
 
     const accessToken = tokenResponse.data.token;
