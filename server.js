@@ -8,6 +8,7 @@ const hdkey = require('hdkey');
 const bitcoin = require('bitcoinjs-lib');
 const { ethers } = require('ethers');
 const axios = require('axios');
+const crypto = require('crypto');
 
 const ECPairFactory = require('ecpair').ECPairFactory;
 const ecc = require('tiny-secp256k1');
@@ -17,6 +18,13 @@ bitcoin.initEccLib(ecc); // 🔥 AJOUTE CETTE LIGNE ICI
 const app = express();
 const PORT = process.env.PORT || 3002;
 const DATA_FILE = path.join(__dirname, 'users_data.json');
+
+// ========================================
+// CONFIGURATION SUMSUB
+// ========================================
+const SUMSUB_APP_TOKEN = 'sbx:o5GaC6ik6Dc76VLPaa8hGdSz.DGPmwbfjytppgLeGcI0wF8V4EO7L59C6';
+const SUMSUB_SECRET_KEY = 'h7KOxNj1UnyAvYQ5F3rGgwCUXzIr1mSS';
+const SUMSUB_BASE_URL = 'https://api.sumsub.com';
 
 // 🔒 SÉCURITÉ : Verrou pour éviter les écritures simultanées
 let isWriting = false;
@@ -2430,7 +2438,96 @@ const scheduleInterestCalculation = () => {
 scheduleInterestCalculation();
 
 
+// ========================================
+// ROUTES SUMSUB
+// ========================================
 
+// Fonction pour signer les requêtes Sumsub
+function createSignature(method, url, timestamp, body = '') {
+  const data = timestamp + method + url + body;
+  return crypto.createHmac('sha256', SUMSUB_SECRET_KEY)
+    .update(data)
+    .digest('hex');
+}
+
+// POST - Créer un access token pour un utilisateur
+app.post('/api/sumsub/token', async (req, res) => {
+  try {
+    const { userId, levelName = 'idv-and-phone-verification' } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'userId requis' 
+      });
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const method = 'POST';
+    const url = `/resources/applicants?levelName=${levelName}`;
+    
+    const applicantData = {
+      externalUserId: userId,
+      info: {
+        country: 'FRA'
+      }
+    };
+
+    const body = JSON.stringify(applicantData);
+    const signature = createSignature(method, url, timestamp, body);
+
+    const applicantResponse = await axios({
+      method: 'POST',
+      url: `${SUMSUB_BASE_URL}${url}`,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-App-Token': SUMSUB_APP_TOKEN,
+        'X-App-Access-Sig': signature,
+        'X-App-Access-Ts': timestamp
+      },
+      data: applicantData
+    });
+
+    const applicantId = applicantResponse.data.id;
+    console.log(`✅ Applicant Sumsub créé: ${applicantId}`);
+
+    const tokenTimestamp = Math.floor(Date.now() / 1000).toString();
+    const tokenMethod = 'POST';
+    const tokenUrl = `/resources/accessTokens?userId=${userId}&levelName=${levelName}`;
+    const tokenSignature = createSignature(tokenMethod, tokenUrl, tokenTimestamp);
+
+    const tokenResponse = await axios({
+      method: 'POST',
+      url: `${SUMSUB_BASE_URL}${tokenUrl}`,
+      headers: {
+        'Accept': 'application/json',
+        'X-App-Token': SUMSUB_APP_TOKEN,
+        'X-App-Access-Sig': tokenSignature,
+        'X-App-Access-Ts': tokenTimestamp
+      }
+    });
+
+    const accessToken = tokenResponse.data.token;
+    console.log(`✅ Access token Sumsub généré pour ${userId}`);
+
+    res.json({
+      success: true,
+      token: accessToken,
+      applicantId: applicantId
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur Sumsub:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur génération token Sumsub',
+      error: error.response?.data || error.message
+    });
+  }
+});
+
+console.log('✅ Routes Sumsub ajoutées');
 
 
 
