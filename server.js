@@ -26,6 +26,19 @@ const SUMSUB_APP_TOKEN = 'sbx:o5GaC6ik6Dc76VLPaa8hGdSz.DGPmwbfjytppgLeGcI0wF8V4E
 const SUMSUB_SECRET_KEY = 'h7KOxNj1UnyAvYQ5F3rGgwCUXzIr1mSS';
 const SUMSUB_BASE_URL = 'https://api.sumsub.com';
 
+// Convertir code pays ISO2 → ISO3 pour Sumsub
+const countryISO2toISO3 = {
+  'FR': 'FRA', 'BE': 'BEL', 'CH': 'CHE', 'DE': 'DEU', 'US': 'USA',
+  'CA': 'CAN', 'GB': 'GBR', 'SG': 'SGP', 'ZA': 'ZAF', 'AR': 'ARG',
+  'AU': 'AUS', 'AT': 'AUT', 'BR': 'BRA', 'BG': 'BGR', 'CY': 'CYP',
+  'KR': 'KOR', 'HR': 'HRV', 'DK': 'DNK', 'ES': 'ESP', 'EE': 'EST',
+  'FI': 'FIN', 'GR': 'GRC', 'HK': 'HKG', 'HU': 'HUN', 'IE': 'IRL',
+  'IS': 'ISL', 'IT': 'ITA', 'JP': 'JPN', 'LV': 'LVA', 'LT': 'LTU',
+  'LU': 'LUX', 'MT': 'MLT', 'MX': 'MEX', 'NO': 'NOR', 'NZ': 'NZL',
+  'NL': 'NLD', 'PL': 'POL', 'PT': 'PRT', 'CZ': 'CZE', 'RO': 'ROU',
+  'SK': 'SVK', 'SI': 'SVN', 'SE': 'SWE', 'AE': 'ARE'
+};
+
 // 🔒 SÉCURITÉ : Verrou pour éviter les écritures simultanées
 let isWriting = false;
 const writeQueue = [];
@@ -2470,18 +2483,25 @@ app.post('/api/sumsub/token', async (req, res) => {
       const method = 'POST';
       const url = `/resources/applicants?levelName=${levelName}`;
       
-      const applicantData = {
-        externalUserId: userId,
-        info: {
-          firstName: userData?.firstName || '',
-          lastName: userData?.lastName || '',
-          dob: userData?.dob || '',
-          country: userData?.country || 'FRA',
-          phone: userData?.phone || '',
-          addresses: userData?.addresses || []
-        },
-        email: userData?.email || userId
-      };
+      // Convertir le code pays 2 lettres en 3 lettres
+const countryCode2 = userData?.country || 'FR';
+const countryCode3 = countryISO2toISO3[countryCode2] || 'FRA';
+
+const applicantData = {
+  externalUserId: userId,
+  info: {
+    firstName: userData?.firstName || '',
+    lastName: userData?.lastName || '',
+    dob: userData?.dob || '',
+    country: countryCode3,
+    phone: userData?.phone || '',
+    addresses: userData?.addresses ? userData.addresses.map(addr => ({
+      ...addr,
+      country: countryISO2toISO3[addr.country] || 'FRA'
+    })) : []
+  },
+  email: userData?.email || userId
+};
 
       const body = JSON.stringify(applicantData);
       const signature = createSignature(method, url, timestamp, body);
