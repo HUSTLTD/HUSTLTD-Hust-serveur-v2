@@ -22,8 +22,8 @@ const DATA_FILE = path.join(__dirname, 'users_data.json');
 // ========================================
 // CONFIGURATION SUMSUB
 // ========================================
-const SUMSUB_APP_TOKEN = 'sbx:o5GaC6ik6Dc76VLPaa8hGdSz.DGPmwbfjytppgLeGcI0wF8V4EO7L59C6';
-const SUMSUB_SECRET_KEY = 'h7KOxNj1UnyAvYQ5F3rGgwCUXzIr1mSS';
+const SUMSUB_APP_TOKEN = 'prd:qgAEj2sWGiU77kQJQa8P0snj.gr9OgYWUxzLO0O0c031KeNN1Ywjd6DRg';
+const SUMSUB_SECRET_KEY = 'EfuCQ7hG2dN2q6njxjMLVmt29Z8EK9dV';
 const SUMSUB_BASE_URL = 'https://api.sumsub.com';
 
 // Convertir code pays ISO2 → ISO3 pour Sumsub
