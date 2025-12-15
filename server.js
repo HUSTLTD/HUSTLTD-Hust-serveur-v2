@@ -2590,6 +2590,56 @@ const tokenResponse = await axios({
 
 
 
+// Route pour reset un applicant Sumsub
+app.post('/api/sumsub/reset-applicant', async (req, res) => {
+  const { email } = req.body;
+  
+  try {
+    const method = 'POST';
+    const url = `/resources/applicants/-;externalUserId=${encodeURIComponent(email)}/reset`;
+    const timestamp = Math.floor(Date.now() / 1000);
+    
+    const signature = createSignature(method, url, timestamp, '');
+    
+    const response = await axios({
+      method: 'POST',
+      url: `${SUMSUB_BASE_URL}${url}`,
+      headers: {
+        'Accept': 'application/json',
+        'X-App-Token': SUMSUB_APP_TOKEN,
+        'X-App-Access-Sig': signature,
+        'X-App-Access-Ts': timestamp
+      }
+    });
+    
+    console.log(`✅ Applicant Sumsub reset: ${email}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Erreur reset applicant:', error.response?.data || error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Route pour supprimer un utilisateur
+app.post('/api/delete-user', async (req, res) => {
+  const { email } = req.body;
+  
+  try {
+    // Supprimer de la base de données
+    users = users.filter(user => user.email.toLowerCase() !== email.toLowerCase());
+    
+    console.log(`✅ Utilisateur supprimé: ${email}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Erreur suppression utilisateur:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+
+
+
 
 
 
