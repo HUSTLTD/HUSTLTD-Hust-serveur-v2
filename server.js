@@ -2590,65 +2590,7 @@ const tokenResponse = await axios({
 
 
 
-// Route pour supprimer/désactiver un applicant Sumsub
-app.post('/api/sumsub/delete-applicant', async (req, res) => {
-  const { email } = req.body;
-  
-  try {
-    // 1. D'abord, récupérer l'applicant ID via externalUserId
-    const getMethod = 'GET';
-    const getUrl = `/resources/applicants/-;externalUserId=${encodeURIComponent(email)}`;
-    const getTimestamp = Math.floor(Date.now() / 1000);
-    const getSignature = createSignature(getMethod, getUrl, getTimestamp, '');
-    
-    let applicantId;
-    
-    try {
-      const getResponse = await axios({
-        method: 'GET',
-        url: `${SUMSUB_BASE_URL}${getUrl}`,
-        headers: {
-          'Accept': 'application/json',
-          'X-App-Token': SUMSUB_APP_TOKEN,
-          'X-App-Access-Sig': getSignature,
-          'X-App-Access-Ts': getTimestamp
-        }
-      });
-      
-      applicantId = getResponse.data.id;
-      console.log(`📋 Applicant trouvé: ${applicantId}`);
-      
-    } catch (getError) {
-      console.log(`ℹ️ Aucun applicant trouvé pour ${email}`);
-      res.json({ success: true, message: 'Aucun applicant à supprimer' });
-      return;
-    }
-    
-    // 2. Supprimer l'applicant
-    const deleteMethod = 'DELETE';
-    const deleteUrl = `/resources/applicants/${applicantId}`;
-    const deleteTimestamp = Math.floor(Date.now() / 1000);
-    const deleteSignature = createSignature(deleteMethod, deleteUrl, deleteTimestamp, '');
-    
-    await axios({
-      method: 'DELETE',
-      url: `${SUMSUB_BASE_URL}${deleteUrl}`,
-      headers: {
-        'Accept': 'application/json',
-        'X-App-Token': SUMSUB_APP_TOKEN,
-        'X-App-Access-Sig': deleteSignature,
-        'X-App-Access-Ts': deleteTimestamp
-      }
-    });
-    
-    console.log(`✅ Applicant Sumsub supprimé/inactif: ${email}`);
-    res.json({ success: true });
-    
-  } catch (error) {
-    console.error('❌ Erreur suppression applicant:', error.response?.data || error.message);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
+
 
 
 
