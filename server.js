@@ -2465,9 +2465,10 @@ app.post('/api/bridge/create-customer', async (req, res) => {
       type: 'individual'
     }, {
       headers: {
-        'Api-Key': BRIDGE_API_KEY,
-        'Content-Type': 'application/json'
-      }
+  'Api-Key': BRIDGE_API_KEY,
+  'Content-Type': 'application/json',
+  'Idempotency-Key': `create-customer-${email}-${Date.now()}`
+}
     });
     
     console.log(`✅ Client Bridge créé: ${email}`, response.data);
