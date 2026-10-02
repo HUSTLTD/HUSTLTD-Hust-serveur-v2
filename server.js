@@ -2517,7 +2517,107 @@ app.post('/api/bridge/create-customer', async (req, res) => {
 
 
 
+// Créer wallet Bridge pour un client
+app.post('/api/bridge/create-wallet', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const users = await readData();
+    const user = users[email.toLowerCase()];
+    
+    if (!user?.bridgeCustomerId) {
+      return res.status(404).json({ success: false, error: 'Client Bridge non trouvé' });
+    }
 
+    const response = await axios.post(
+      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/wallets`,
+      { chain: 'solana' },
+      {
+        headers: {
+          'Api-Key': BRIDGE_API_KEY,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `wallet-${email}-${Date.now()}`
+        }
+      }
+    );
+
+    users[email.toLowerCase()].bridgeWallet = response.data;
+    await writeDataSafe(users);
+
+    res.json({ success: true, wallet: response.data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.response?.data || error.message });
+  }
+});
+
+// Simuler KYC approuvé (sandbox uniquement)
+app.post('/api/bridge/simulate-kyc', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const users = await readData();
+    const user = users[email.toLowerCase()];
+
+    if (!user?.bridgeCustomerId) {
+      return res.status(404).json({ success: false, error: 'Client Bridge non trouvé' });
+    }
+
+    const response = await axios.post(
+      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/simulate_kyc_approval`,
+      {},
+      {
+        headers: {
+          'Api-Key': BRIDGE_API_KEY,
+          'Idempotency-Key': `kyc-sim-${email}-${Date.now()}`
+        }
+      }
+    );
+
+    users[email.toLowerCase()].bridgeKycStatus = 'approved';
+    await writeDataSafe(users);
+
+    res.json({ success: true, data: response.data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.response?.data || error.message });
+  }
+});
+
+// Créer Virtual Account (IBAN/ACH) pour un client
+app.post('/api/bridge/create-virtual-account', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const users = await readData();
+    const user = users[email.toLowerCase()];
+
+    if (!user?.bridgeCustomerId || !user?.bridgeWallet) {
+      return res.status(404).json({ success: false, error: 'Client ou wallet non trouvé' });
+    }
+
+    const response = await axios.post(
+      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
+      {
+        source: { currency: 'usd', payment_rail: 'ach' },
+        destination: {
+          payment_rail: 'solana',
+          currency: 'usdc',
+          bridge_wallet_id: user.bridgeWallet.id
+        }
+      },
+      {
+        headers: {
+          'Api-Key': BRIDGE_API_KEY,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `va-${email}-${Date.now()}`
+        }
+      }
+    );
+
+    users[email.toLowerCase()].bridgeVirtualAccount = response.data;
+    await writeDataSafe(users);
+
+    res.json({ success: true, virtualAccount: response.data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.response?.data || error.message });
+  }
+});
 
 
 
