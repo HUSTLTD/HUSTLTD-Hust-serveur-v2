@@ -20,24 +20,7 @@ const PORT = process.env.PORT || 3002;
 const DATA_FILE = path.join(__dirname, 'users_data.json');
 
 // ========================================
-// CONFIGURATION SUMSUB
-// ========================================
-const SUMSUB_APP_TOKEN = 'prd:qgAEj2sWGiU77kQJQa8P0snj.gr9OgYWUxzLO0O0c031KeNN1Ywjd6DRg';
-const SUMSUB_SECRET_KEY = 'EfuCQ7hG2dN2q6njxjMLVmt29Z8EK9dV';
-const SUMSUB_BASE_URL = 'https://api.sumsub.com';
 
-// Convertir code pays ISO2 → ISO3 pour Sumsub
-const countryISO2toISO3 = {
-  'FR': 'FRA', 'BE': 'BEL', 'CH': 'CHE', 'DE': 'DEU', 'US': 'USA',
-  'CA': 'CAN', 'GB': 'GBR', 'SG': 'SGP', 'ZA': 'ZAF', 'AR': 'ARG',
-  'AU': 'AUS', 'AT': 'AUT', 'BR': 'BRA', 'BG': 'BGR', 'CY': 'CYP',
-  'KR': 'KOR', 'HR': 'HRV', 'DK': 'DNK', 'ES': 'ESP', 'EE': 'EST',
-  'FI': 'FIN', 'GR': 'GRC', 'HK': 'HKG', 'HU': 'HUN', 'IE': 'IRL',
-  'IS': 'ISL', 'IT': 'ITA', 'JP': 'JPN', 'LV': 'LVA', 'LT': 'LTU',
-  'LU': 'LUX', 'MT': 'MLT', 'MX': 'MEX', 'NO': 'NOR', 'NZ': 'NZL',
-  'NL': 'NLD', 'PL': 'POL', 'PT': 'PRT', 'CZ': 'CZE', 'RO': 'ROU',
-  'SK': 'SVK', 'SI': 'SVN', 'SE': 'SWE', 'AE': 'ARE'
-};
 
 // 🔒 SÉCURITÉ : Verrou pour éviter les écritures simultanées
 let isWriting = false;
@@ -2451,142 +2434,60 @@ const scheduleInterestCalculation = () => {
 scheduleInterestCalculation();
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // ========================================
-// ROUTES SUMSUB
+// 🌉 BRIDGE API - Intégration
 // ========================================
 
-// Fonction pour signer les requêtes Sumsub
-function createSignature(method, url, timestamp, body = '') {
-  const data = timestamp + method + url + body;
-  return crypto.createHmac('sha256', SUMSUB_SECRET_KEY)
-    .update(data)
-    .digest('hex');
-}
+const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY || 'sk-test-1b483bc088e89441b8e83aa0e2a765d3201a0fc631bd7752e9d7f46009793fd5c00e6dacff9b380';
+const BRIDGE_BASE_URL = 'https://api.sandbox.bridge.xyz';
 
-// POST - Créer un access token pour un utilisateur
-app.post('/api/sumsub/token', async (req, res) => {
+// Créer un client Bridge lors de l'inscription HUST
+app.post('/api/bridge/create-customer', async (req, res) => {
   try {
-    const { userId, levelName = 'idv-and-phone-verification', userData } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'userId requis' 
-      });
-    }
-
-    let applicantId;
-
-    // 1. Essayer de créer un applicant avec les données user
-    try {
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const method = 'POST';
-      const url = `/resources/applicants?levelName=${levelName}`;
-      
-      // Convertir le code pays 2 lettres en 3 lettres
-const countryCode2 = userData?.country || 'FR';
-const countryCode3 = countryISO2toISO3[countryCode2] || 'FRA';
-
-const applicantData = {
-  externalUserId: userId,
-  info: {
-    firstName: userData?.firstName || '',
-    lastName: userData?.lastName || '',
-    dob: userData?.dob || '',
-    country: countryCode3,
-    phone: userData?.phone || '',
-    addresses: userData?.addresses ? userData.addresses.map(addr => ({
-      ...addr,
-      country: countryISO2toISO3[addr.country] || 'FRA'
-    })) : []
-  },
-  email: userData?.email || userId
-};
-
-      const body = JSON.stringify(applicantData);
-      const signature = createSignature(method, url, timestamp, body);
-
-      const applicantResponse = await axios({
-        method: 'POST',
-        url: `${SUMSUB_BASE_URL}${url}`,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-App-Token': SUMSUB_APP_TOKEN,
-          'X-App-Access-Sig': signature,
-          'X-App-Access-Ts': timestamp
-        },
-        data: applicantData
-      });
-
-      applicantId = applicantResponse.data.id;
-      console.log(`✅ Nouvel applicant créé: ${applicantId}`);
-
-    } catch (createError) {
-      // Si l'applicant existe déjà (code 409), on le récupère
-      if (createError.response?.status === 409) {
-        console.log(`ℹ️ Applicant existe déjà pour ${userId}, récupération...`);
-        
-        // Extraire l'ID de l'applicant du message d'erreur
-        const existingId = createError.response.data.description.match(/[a-f0-9]{24}/)?.[0];
-        
-        if (existingId) {
-          applicantId = existingId;
-          console.log(`✅ Applicant existant récupéré: ${applicantId}`);
-        } else {
-          throw new Error('Impossible de récupérer l\'ID de l\'applicant existant');
-        }
-      } else {
-        // Autre erreur, on la remonte
-        throw createError;
+    const { email, firstName, lastName } = req.body;
+    
+    const response = await axios.post(`${BRIDGE_BASE_URL}/v0/customers`, {
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      type: 'individual'
+    }, {
+      headers: {
+        'Api-Key': BRIDGE_API_KEY,
+        'Content-Type': 'application/json'
       }
-    }
-
-    // 2. Générer un access token pour cet applicant
-    const tokenTimestamp = Math.floor(Date.now() / 1000).toString();
-const tokenMethod = 'POST';
-const tokenUrl = `/resources/accessTokens/sdk`;
-
-const tokenBody = {
-  userId: userId,
-  levelName: levelName,
-  ttlInSecs: 600
-};
-
-const tokenBodyString = JSON.stringify(tokenBody);
-const tokenSignature = createSignature(tokenMethod, tokenUrl, tokenTimestamp, tokenBodyString);
-
-const tokenResponse = await axios({
-  method: 'POST',
-  url: `${SUMSUB_BASE_URL}${tokenUrl}`,
-  headers: {
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-    'X-App-Token': SUMSUB_APP_TOKEN,
-    'X-App-Access-Sig': tokenSignature,
-    'X-App-Access-Ts': tokenTimestamp
-  },
-  data: tokenBody
-});
-
-    const accessToken = tokenResponse.data.token;
-    console.log(`✅ Access token généré pour ${userId}`);
-
+    });
+    
+    console.log(`✅ Client Bridge créé: ${email}`, response.data);
+    
     res.json({
       success: true,
-      token: accessToken,
-      applicantId: applicantId
+      bridgeCustomerId: response.data.id,
+      data: response.data
     });
-
+    
   } catch (error) {
-    console.error('❌ Erreur Sumsub:', error.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur génération token Sumsub',
-      error: error.response?.data || error.message
+    console.error('❌ Erreur Bridge create-customer:', error.response?.data || error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: error.response?.data || error.message 
     });
   }
 });
+
+
 
 
 
