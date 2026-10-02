@@ -617,6 +617,33 @@ app.post('/api/users', async (req, res) => {
     };
     
     const saved = await writeDataSafe(users);
+
+    // 🌉 Créer automatiquement le client Bridge
+    try {
+      const nameParts = (userData.fullName || '').split(' ');
+      const firstName = nameParts[0] || email;
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
+      const bridgeResponse = await axios.post(
+        `${BRIDGE_BASE_URL}/v0/customers`,
+        { email, first_name: firstName, last_name: lastName, type: 'individual' },
+        {
+          headers: {
+            'Api-Key': BRIDGE_API_KEY,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `create-customer-${email}-${Date.now()}`
+          }
+        }
+      );
+      
+      // Sauvegarder l'ID Bridge dans le profil user
+      users[email].bridgeCustomerId = bridgeResponse.data.id;
+      users[email].bridgeTosLink = bridgeResponse.data.tos_link;
+      await writeDataSafe(users);
+      console.log(`✅ Bridge customer créé pour ${email}: ${bridgeResponse.data.id}`);
+    } catch (bridgeError) {
+      console.log(`⚠️ Bridge non créé pour ${email}:`, bridgeError.response?.data || bridgeError.message);
+    }
     
     if (saved) {
       res.json({
@@ -625,10 +652,7 @@ app.post('/api/users', async (req, res) => {
         user: users[email]
       });
     } else {
-      res.status(500).json({
-        success: false,
-        message: 'Erreur lors de la sauvegarde'
-      });
+      res.status(500).json({ success: false, message: 'Erreur lors de la sauvegarde' });
     }
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
