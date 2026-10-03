@@ -2514,7 +2514,19 @@ app.post('/api/bridge/create-customer', async (req, res) => {
 
 
 
-
+// Récupérer le lien KYC Bridge
+app.get('/api/bridge/kyc-link/:email', async (req, res) => {
+  try {
+    const users = await readData();
+    const user = users[req.params.email.toLowerCase()];
+    if (!user?.bridgeTosLink) {
+      return res.status(404).json({ success: false, error: 'TOS link non trouvé' });
+    }
+    res.json({ success: true, tosLink: user.bridgeTosLink });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 
 // Créer wallet Bridge pour un client
