@@ -2652,7 +2652,7 @@ app.post('/api/bridge/create-virtual-account', async (req, res) => {
       const gbpRes = await axios.post(
         `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
         {
-          source: { currency: 'gbp', payment_rail: 'fps' },
+          source: { currency: 'gbp', payment_rail: 'faster_payments' },
           destination: { payment_rail: 'solana', currency: 'usdc', bridge_wallet_id: walletId }
         },
         {
