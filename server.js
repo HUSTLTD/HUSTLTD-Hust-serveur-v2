@@ -2602,34 +2602,82 @@ app.post('/api/bridge/create-virtual-account', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Client ou wallet non trouvé' });
     }
 
-    const response = await axios.post(
-      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
-      {
-        source: { currency: 'usd', payment_rail: 'ach' },
-        destination: {
-          payment_rail: 'solana',
-          currency: 'usdc',
-          bridge_wallet_id: user.bridgeWallet.id
-        }
-      },
-      {
-        headers: {
-          'Api-Key': BRIDGE_API_KEY,
-          'Content-Type': 'application/json',
-          'Idempotency-Key': `va-${email}-${Date.now()}`
-        }
-      }
-    );
+    const walletId = user.bridgeWallet.id;
+    const results = {};
 
-    users[email.toLowerCase()].bridgeVirtualAccount = response.data;
+    // USD Virtual Account (ACH)
+    try {
+      const usdRes = await axios.post(
+        `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
+        {
+          source: { currency: 'usd', payment_rail: 'ach' },
+          destination: { payment_rail: 'solana', currency: 'usdc', bridge_wallet_id: walletId }
+        },
+        {
+          headers: {
+            'Api-Key': BRIDGE_API_KEY,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `va-usd-${email}-${Date.now()}`
+          }
+        }
+      );
+      results.usd = usdRes.data;
+    } catch (e) {
+      console.log('⚠️ USD VA failed:', e.response?.data);
+    }
+
+    // EUR Virtual Account (SEPA)
+    try {
+      const eurRes = await axios.post(
+        `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
+        {
+          source: { currency: 'eur', payment_rail: 'sepa' },
+          destination: { payment_rail: 'solana', currency: 'usdc', bridge_wallet_id: walletId }
+        },
+        {
+          headers: {
+            'Api-Key': BRIDGE_API_KEY,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `va-eur-${email}-${Date.now()}`
+          }
+        }
+      );
+      results.eur = eurRes.data;
+    } catch (e) {
+      console.log('⚠️ EUR VA failed:', e.response?.data);
+    }
+
+    // GBP Virtual Account (FPS)
+    try {
+      const gbpRes = await axios.post(
+        `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
+        {
+          source: { currency: 'gbp', payment_rail: 'fps' },
+          destination: { payment_rail: 'solana', currency: 'usdc', bridge_wallet_id: walletId }
+        },
+        {
+          headers: {
+            'Api-Key': BRIDGE_API_KEY,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `va-gbp-${email}-${Date.now()}`
+          }
+        }
+      );
+      results.gbp = gbpRes.data;
+    } catch (e) {
+      console.log('⚠️ GBP VA failed:', e.response?.data);
+    }
+
+    users[email.toLowerCase()].bridgeVirtualAccounts = results;
+    users[email.toLowerCase()].bridgeVirtualAccount = results.usd || results.eur;
     await writeDataSafe(users);
 
-    res.json({ success: true, virtualAccount: response.data });
+    res.json({ success: true, virtualAccounts: results });
+
   } catch (error) {
     res.status(500).json({ success: false, error: error.response?.data || error.message });
   }
 });
-
 
 
 
