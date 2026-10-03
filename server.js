@@ -620,9 +620,8 @@ app.post('/api/users', async (req, res) => {
 
     // 🌉 Créer automatiquement le client Bridge
     try {
-      const nameParts = (userData.fullName || '').split(' ');
-      const firstName = nameParts[0] || email;
-      const lastName = nameParts.slice(1).join(' ') || '';
+      const firstName = userData.firstName || userData.fullName || 'Inconnu';
+      const lastName = userData.lastName || 'Inconnu';
       
       const bridgeResponse = await axios.post(
         `${BRIDGE_BASE_URL}/v0/customers`,
