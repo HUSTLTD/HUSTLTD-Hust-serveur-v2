@@ -2681,7 +2681,53 @@ app.post('/api/bridge/create-virtual-account', async (req, res) => {
 
 
 
+// Récupérer solde réel Bridge + devises disponibles
+app.get('/api/bridge/balance/:email', async (req, res) => {
+  try {
+    const users = await readData();
+    const user = users[req.params.email.toLowerCase()];
 
+    if (!user?.bridgeCustomerId || !user?.bridgeWallet?.id) {
+      return res.json({ 
+        success: true, 
+        balance: '0',
+        availableCurrencies: [],
+        virtualAccounts: {}
+      });
+    }
+
+    const response = await axios.get(
+      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/wallets/${user.bridgeWallet.id}`,
+      { headers: { 'Api-Key': BRIDGE_API_KEY } }
+    );
+
+    const usdc = response.data.balances.find(b => b.currency === 'usdc');
+    const balance = usdc?.balance || '0';
+
+    const availableCurrencies = [];
+    const virtualAccounts = user.bridgeVirtualAccounts || {};
+
+    if (virtualAccounts.eur?.source_deposit_instructions?.iban) {
+      availableCurrencies.push('eur');
+    }
+    if (virtualAccounts.usd?.source_deposit_instructions?.bank_routing_number) {
+      availableCurrencies.push('usd');
+    }
+    if (virtualAccounts.gbp?.source_deposit_instructions?.sort_code) {
+      availableCurrencies.push('gbp');
+    }
+
+    res.json({
+      success: true,
+      balance,
+      availableCurrencies,
+      virtualAccounts
+    });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 
 
