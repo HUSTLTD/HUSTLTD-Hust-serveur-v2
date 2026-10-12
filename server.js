@@ -2731,6 +2731,162 @@ app.get('/api/bridge/balance/:email', async (req, res) => {
 
 
 
+// Étape 1 — Créer external account client chez Bridge
+app.post('/api/bridge/create-external-account', async (req, res) => {
+  try {
+    const { email, currency, bankDetails } = req.body;
+    const users = await readData();
+    const user = users[email.toLowerCase()];
+
+    if (!user?.bridgeCustomerId) {
+      return res.status(404).json({ success: false, error: 'Client Bridge non trouvé' });
+    }
+
+    const paymentRail = currency === 'EUR' ? 'sepa' : currency === 'GBP' ? 'faster_payments' : 'ach';
+
+    const accountPayload = {
+      currency: currency.toLowerCase(),
+      account_owner_name: bankDetails.bankName,
+      account_owner_type: 'individual',
+      first_name: user.firstName || 'Sandbox',
+      last_name: user.lastName || 'User',
+      ...(currency === 'EUR' ? {
+        account: { iban: bankDetails.iban.replace(/\s/g, ''), bic: bankDetails.bic }
+      } : currency === 'USD' ? {
+        account: { routing_number: bankDetails.routing, account_number: bankDetails.account, checking_or_savings: 'checking' }
+      } : {
+        account: { sort_code: bankDetails.sortCode.replace(/-/g, ''), account_number: bankDetails.account }
+      })
+    };
+
+    const response = await axios.post(
+      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/external_accounts`,
+      accountPayload,
+      {
+        headers: {
+          'Api-Key': BRIDGE_API_KEY,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `ext-account-${email}-${currency}-${Date.now()}`
+        }
+      }
+    );
+
+    res.json({ success: true, externalAccountId: response.data.id });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.response?.data || error.message });
+  }
+});
+
+// Étape 2 — Transfer off-ramp
+app.post('/api/bridge/transfer-offRamp', async (req, res) => {
+  try {
+    const { email, amount, currency, externalAccountId } = req.body;
+    const users = await readData();
+    const user = users[email.toLowerCase()];
+
+    if (!user?.bridgeCustomerId || !user?.bridgeWallet?.id) {
+      return res.status(404).json({ success: false, error: 'Client Bridge non trouvé' });
+    }
+
+    const paymentRail = currency === 'EUR' ? 'sepa' : currency === 'GBP' ? 'faster_payments' : 'ach';
+
+    const response = await axios.post(
+      `${BRIDGE_BASE_URL}/v0/transfers`,
+      {
+        amount: amount.toString(),
+        on_behalf_of: user.bridgeCustomerId,
+        source: {
+          payment_rail: 'bridge_wallet',
+          currency: 'usdc',
+          bridge_wallet_id: user.bridgeWallet.id
+        },
+        destination: {
+          payment_rail: paymentRail,
+          currency: currency.toLowerCase(),
+          external_account_id: externalAccountId
+        }
+      },
+      {
+        headers: {
+          'Api-Key': BRIDGE_API_KEY,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `offRamp-${email}-${Date.now()}`
+        }
+      }
+    );
+
+    res.json({ success: true, transfer: response.data });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.response?.data || error.message });
+  }
+});
+
+
+
+
+
+// POST - Adresses de dépôt stablecoin (Bridge wallets)
+app.post('/api/deposit-addresses', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email requis' });
+
+    const users = await readData();
+    const user = users[email.toLowerCase()];
+
+    if (!user) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    if (!user.bridgeCustomerId) return res.status(400).json({ success: false, error: 'Client Bridge non créé' });
+
+    // Récupérer le wallet Bridge existant
+    const walletResponse = await axios.get(
+      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/wallets`,
+      { headers: { 'Api-Key': BRIDGE_API_KEY } }
+    );
+
+    const wallets = walletResponse.data?.data || [];
+    
+    let solana = null;
+    let evm = null;
+    let tron = null;
+
+    for (const wallet of wallets) {
+      const chain = (wallet.chain || '').toLowerCase();
+      const addr = wallet.address;
+      if (chain === 'sol' || chain === 'solana') solana = addr;
+      else if (chain === 'tron' || chain === 'trx') tron = addr;
+      else evm = addr; // eth, base, arbitrum, etc.
+    }
+
+    // Si aucun wallet, en créer un
+    if (!solana && !evm) {
+      const newWallet = await axios.post(
+        `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/wallets`,
+        {},
+        { headers: { 'Api-Key': BRIDGE_API_KEY, 'Content-Type': 'application/json' } }
+      );
+      const chain = (newWallet.data?.chain || '').toLowerCase();
+      if (chain === 'sol' || chain === 'solana') solana = newWallet.data.address;
+      else evm = newWallet.data.address;
+    }
+
+    res.json({ success: true, solana, evm, tron });
+
+  } catch (error) {
+    console.error('❌ Erreur deposit-addresses:', error.response?.data || error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
+
+
+
+
+
+
+
 
 // Démarrer le serveur
 app.listen(PORT, () => {
