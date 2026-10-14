@@ -54,6 +54,152 @@ const processWriteQueue = async () => {
   }
 };
 
+
+
+
+
+
+
+
+
+
+
+// ============================================================================
+// 🔔 WEBHOOK BRIDGE — Dépôts et transferts
+// ============================================================================
+
+const BRIDGE_WEBHOOK_SECRET = process.env.BRIDGE_WEBHOOK_SECRET || '';
+
+function verifyBridgeSignature(payload, signature, secret) {
+  if (!secret || !signature) return true;
+  try {
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(payload)
+      .digest('hex');
+    return crypto.timingSafeEqual(
+      Buffer.from(signature.replace('sha256=', ''), 'hex'),
+      Buffer.from(expected, 'hex')
+    );
+  } catch { return false; }
+}
+
+async function creditUser(users, customerId, amount, currency, depositId, source) {
+  const userEmail = Object.keys(users).find(
+    email => users[email].bridgeCustomerId === customerId
+  );
+  if (!userEmail) {
+    console.error(`❌ Webhook — customer_id introuvable: ${customerId}`);
+    return;
+  }
+  if (!users[userEmail].processedWebhooks) users[userEmail].processedWebhooks = [];
+  if (users[userEmail].processedWebhooks.includes(depositId)) {
+    console.log(`⚠️ Webhook déjà traité: ${depositId}`);
+    return;
+  }
+  users[userEmail].cashBalance = (users[userEmail].cashBalance || 0) + amount;
+  users[userEmail].processedWebhooks.push(depositId);
+  if (users[userEmail].processedWebhooks.length > 200) {
+    users[userEmail].processedWebhooks = users[userEmail].processedWebhooks.slice(-200);
+  }
+  if (!users[userEmail].transactionHistory) users[userEmail].transactionHistory = [];
+  users[userEmail].transactionHistory.unshift({
+    id: depositId,
+    date: new Date().toISOString(),
+    type: 'deposit',
+    amount,
+    currency,
+    source
+  });
+  if (users[userEmail].transactionHistory.length > 50) {
+    users[userEmail].transactionHistory = users[userEmail].transactionHistory.slice(0, 50);
+  }
+  users[userEmail].lastUpdated = new Date().toISOString();
+  await writeDataSafe(users);
+  console.log(`✅ Crédité: ${userEmail} +${amount} ${currency.toUpperCase()} via ${source} (total: ${users[userEmail].cashBalance})`);
+}
+
+app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const signature = req.headers['bridge-signature'] || '';
+    if (!verifyBridgeSignature(req.body, signature, BRIDGE_WEBHOOK_SECRET)) {
+      console.error('❌ Webhook Bridge — signature invalide');
+      return;
+    }
+
+    const event = JSON.parse(req.body.toString());
+    console.log(`📨 Webhook Bridge reçu: ${event.type}`);
+
+    const users = await readData();
+
+    // Dépôt via Virtual Account (IBAN / ACH / SEPA)
+    if (event.type === 'virtual_account.deposit.completed') {
+      const customerId = event.data?.customer_id;
+      const amount = parseFloat(event.data?.amount || 0);
+      const currency = event.data?.currency || 'usdc';
+      const depositId = event.data?.id;
+      if (!customerId || amount <= 0) return;
+      await creditUser(users, customerId, amount, currency, depositId, 'virtual_account');
+    }
+
+    // Dépôt crypto direct USDC/USDT sur wallet Bridge
+    else if (
+      event.type === 'wallet.deposit.completed' ||
+      event.type === 'liquidation_address.drain.completed'
+    ) {
+      const customerId = event.data?.customer_id;
+      const amount = parseFloat(event.data?.amount || event.data?.net_amount || 0);
+      const currency = event.data?.currency || 'usdc';
+      const depositId = event.data?.id;
+      if (!customerId || amount <= 0) return;
+      await creditUser(users, customerId, amount, currency, depositId, 'crypto_deposit');
+    }
+
+    // Retrait échoué → remboursement automatique
+    else if (event.type === 'transfer.failed') {
+      const customerId = event.data?.on_behalf_of;
+      const amount = parseFloat(event.data?.amount || 0);
+      const transferId = event.data?.id;
+      if (!customerId || amount <= 0) return;
+      const userEmail = Object.keys(users).find(
+        email => users[email].bridgeCustomerId === customerId
+      );
+      if (!userEmail) {
+        console.error(`❌ transfer.failed — customer_id introuvable: ${customerId}`);
+        return;
+      }
+      users[userEmail].cashBalance = (users[userEmail].cashBalance || 0) + amount;
+      users[userEmail].lastUpdated = new Date().toISOString();
+      if (!users[userEmail].transactionHistory) users[userEmail].transactionHistory = [];
+      users[userEmail].transactionHistory.unshift({
+        id: `refund_${transferId}`,
+        date: new Date().toISOString(),
+        type: 'refund',
+        amount,
+        reason: 'transfer_failed'
+      });
+      await writeDataSafe(users);
+      console.log(`🔄 Remboursement: ${userEmail} +${amount}`);
+    }
+
+    else {
+      console.log(`ℹ️ Webhook ignoré: ${event.type}`);
+    }
+
+  } catch (error) {
+    console.error('❌ Erreur webhook Bridge:', error.message);
+  }
+});
+
+
+
+
+
+
+
+
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -2560,36 +2706,7 @@ app.post('/api/bridge/create-wallet', async (req, res) => {
   }
 });
 
-// Simuler KYC approuvé (sandbox uniquement)
-app.post('/api/bridge/simulate-kyc', async (req, res) => {
-  try {
-    const { email } = req.body;
-    const users = await readData();
-    const user = users[email.toLowerCase()];
-
-    if (!user?.bridgeCustomerId) {
-      return res.status(404).json({ success: false, error: 'Client Bridge non trouvé' });
-    }
-
-    const response = await axios.post(
-      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/simulate_kyc_approval`,
-      {},
-      {
-        headers: {
-          'Api-Key': BRIDGE_API_KEY,
-          'Idempotency-Key': `kyc-sim-${email}-${Date.now()}`
-        }
-      }
-    );
-
-    users[email.toLowerCase()].bridgeKycStatus = 'approved';
-    await writeDataSafe(users);
-
-    res.json({ success: true, data: response.data });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.response?.data || error.message });
-  }
-});
+// simulate-kyc supprimé (sandbox uniquement, non utilisé en production)
 
 // Créer Virtual Account (IBAN/ACH) pour un client
 app.post('/api/bridge/create-virtual-account', async (req, res) => {
@@ -2602,7 +2719,7 @@ app.post('/api/bridge/create-virtual-account', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Client ou wallet non trouvé' });
     }
 
-    const walletId = user.bridgeWallet.id;
+    const walletId = process.env.BRIDGE_POOL1_WALLET_ID || 'd5346d4e-453f-4984-8232-09e6c633ec73';
     const results = {};
 
     // USD Virtual Account (ACH)
@@ -2835,49 +2952,49 @@ app.post('/api/deposit-addresses', async (req, res) => {
 
     const users = await readData();
     const user = users[email.toLowerCase()];
+    if (!user?.bridgeCustomerId) return res.status(400).json({ success: false, error: 'Client Bridge non créé' });
 
-    if (!user) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
-    if (!user.bridgeCustomerId) return res.status(400).json({ success: false, error: 'Client Bridge non créé' });
+    // Vérifier si une liquidation address existe déjà en DB
+    if (user.bridgeLiquidationAddress) {
+      return res.json({ success: true, solana: user.bridgeLiquidationAddress });
+    }
 
-    // Récupérer le wallet Bridge existant
-    const walletResponse = await axios.get(
-      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/wallets`,
-      { headers: { 'Api-Key': BRIDGE_API_KEY } }
+    // Créer une liquidation address Bridge → destination POOL1
+    const liqRes = await axios.post(
+      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/liquidation_addresses`,
+      {
+        chain: 'solana',
+        currency: 'usdc',
+        destination_payment_rail: 'solana',
+        destination_currency: 'usdc',
+        destination_address: '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX'
+      },
+      { headers: { 'Api-Key': BRIDGE_API_KEY, 'Content-Type': 'application/json' } }
     );
 
-    const wallets = walletResponse.data?.data || [];
-    
-    let solana = null;
-    let evm = null;
-    let tron = null;
+    const liqAddress = liqRes.data?.address;
+    if (!liqAddress) throw new Error('Adresse non retournée par Bridge');
 
-    for (const wallet of wallets) {
-      const chain = (wallet.chain || '').toLowerCase();
-      const addr = wallet.address;
-      if (chain === 'sol' || chain === 'solana') solana = addr;
-      else if (chain === 'tron' || chain === 'trx') tron = addr;
-      else evm = addr; // eth, base, arbitrum, etc.
-    }
+    // Sauvegarder en DB pour ne pas recréer à chaque fois
+    users[email.toLowerCase()].bridgeLiquidationAddress = liqAddress;
+    await writeDataSafe(users);
 
-    // Si aucun wallet, en créer un
-    if (!solana && !evm) {
-      const newWallet = await axios.post(
-        `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/wallets`,
-        {},
-        { headers: { 'Api-Key': BRIDGE_API_KEY, 'Content-Type': 'application/json' } }
-      );
-      const chain = (newWallet.data?.chain || '').toLowerCase();
-      if (chain === 'sol' || chain === 'solana') solana = newWallet.data.address;
-      else evm = newWallet.data.address;
-    }
-
-    res.json({ success: true, solana, evm, tron });
+    res.json({ success: true, solana: liqAddress });
 
   } catch (error) {
     console.error('❌ Erreur deposit-addresses:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+
+
+
+
+
+
+
+
 
 
 
