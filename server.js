@@ -2664,37 +2664,53 @@ const BRIDGE_BASE_URL = 'https://api.sandbox.bridge.xyz';
 app.post('/api/bridge/create-customer', async (req, res) => {
   try {
     const { email, firstName, lastName } = req.body;
-    
-    const response = await axios.post(`${BRIDGE_BASE_URL}/v0/customers`, {
-      email,
-      first_name: firstName,
-      last_name: lastName,
-      type: 'individual'
-    }, {
-      headers: {
-  'Api-Key': BRIDGE_API_KEY,
-  'Content-Type': 'application/json',
-  'Idempotency-Key': `create-customer-${email}-${Date.now()}`
-}
-    });
-    
-    console.log(`✅ Client Bridge créé: ${email}`, response.data);
-    
-    res.json({
-      success: true,
-      bridgeCustomerId: response.data.id,
-      data: response.data
-    });
-    
+
+    let customerId;
+
+    try {
+      const response = await axios.post(`${BRIDGE_BASE_URL}/v0/customers`, {
+        email,
+        first_name: firstName,
+        last_name: lastName,
+        type: 'individual'
+      }, {
+        headers: {
+          'Api-Key': BRIDGE_API_KEY,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `create-customer-${email}-${Date.now()}`
+        }
+      });
+      customerId = response.data.id;
+      console.log(`✅ Client Bridge créé: ${email}`, response.data);
+    } catch (createError) {
+      // Customer déjà existant → le récupérer par email
+      if (createError.response?.data?.source?.key?.email?.includes('already exists')) {
+        const searchRes = await axios.get(
+          `${BRIDGE_BASE_URL}/v0/customers?email=${encodeURIComponent(email)}`,
+          { headers: { 'Api-Key': BRIDGE_API_KEY } }
+        );
+        const existing = searchRes.data?.data?.[0];
+        if (!existing?.id) throw new Error('Customer Bridge introuvable après recherche');
+        customerId = existing.id;
+        console.log(`ℹ️ Customer Bridge déjà existant récupéré: ${email} → ${customerId}`);
+      } else {
+        throw createError;
+      }
+    }
+
+    // Sauvegarder en DB
+    const users = await readData();
+    if (!users[email.toLowerCase()]) users[email.toLowerCase()] = {};
+    users[email.toLowerCase()].bridgeCustomerId = customerId;
+    await writeDataSafe(users);
+
+    res.json({ success: true, bridgeCustomerId: customerId });
+
   } catch (error) {
     console.error('❌ Erreur Bridge create-customer:', error.response?.data || error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: error.response?.data || error.message 
-    });
+    res.status(500).json({ success: false, error: error.response?.data || error.message });
   }
 });
-
 
 
 // Récupérer le lien KYC Bridge
