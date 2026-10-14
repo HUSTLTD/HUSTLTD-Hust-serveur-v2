@@ -2917,7 +2917,7 @@ app.post('/api/bridge/create-external-account', async (req, res) => {
 
     const accountPayload = {
       currency: currency.toLowerCase(),
-      account_owner_name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+      account_owner_name: bankDetails.accountHolderName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Account Owner',
       account_owner_type: 'individual',
       first_name: user.firstName || 'Sandbox',
       last_name: user.lastName || 'User',
