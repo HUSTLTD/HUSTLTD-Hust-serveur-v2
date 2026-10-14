@@ -1801,7 +1801,7 @@ users[email].lastUpdated = new Date().toISOString();
     
     res.json({
       success: true,
-      balances: newBalances,
+      balances: newCryptoWallet,
       totalValue: newTotalValue,
       user: users[email]
     });
@@ -2810,7 +2810,7 @@ app.post('/api/bridge/create-virtual-account', async (req, res) => {
         `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
         {
           source: { currency: 'usd', payment_rail: 'ach' },
-          destination: { payment_rail: 'solana', currency: 'usdc', bridge_wallet_id: walletId }
+          destination: { payment_rail: 'solana', currency: 'usdc', address: '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX' }
         },
         {
           headers: {
@@ -2831,7 +2831,7 @@ app.post('/api/bridge/create-virtual-account', async (req, res) => {
         `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
         {
           source: { currency: 'eur', payment_rail: 'sepa' },
-          destination: { payment_rail: 'solana', currency: 'usdc', bridge_wallet_id: walletId }
+          destination: { payment_rail: 'solana', currency: 'usdc', address: '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX' }
         },
         {
           headers: {
@@ -2852,7 +2852,7 @@ app.post('/api/bridge/create-virtual-account', async (req, res) => {
         `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/virtual_accounts`,
         {
           source: { currency: 'gbp', payment_rail: 'faster_payments' },
-          destination: { payment_rail: 'solana', currency: 'usdc', bridge_wallet_id: walletId }
+          destination: { payment_rail: 'solana', currency: 'usdc', address: '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX' }
         },
         {
           headers: {
@@ -3005,7 +3005,7 @@ app.post('/api/bridge/transfer-offRamp', async (req, res) => {
         source: {
           payment_rail: 'bridge_wallet',
           currency: 'usdc',
-          bridge_wallet_id: user.bridgeWallet.id
+          bridge_wallet_id: process.env.BRIDGE_POOL1_WALLET_ID || 'd5346d4e-453f-4984-8232-09e6c633ec73'
         },
         destination: {
           payment_rail: paymentRail,
@@ -3033,27 +3033,31 @@ app.post('/api/bridge/transfer-offRamp', async (req, res) => {
 
 
 
-// POST - Adresses de dépôt stablecoin (Bridge wallets)
+// POST - Adresses de dépôt stablecoin (liquidation addresses par réseau/actif)
 app.post('/api/deposit-addresses', async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, chain, currency } = req.body;
     if (!email) return res.status(400).json({ success: false, error: 'Email requis' });
 
     const users = await readData();
     const user = users[email.toLowerCase()];
     if (!user?.bridgeCustomerId) return res.status(400).json({ success: false, error: 'Client Bridge non créé' });
 
-    // Vérifier si une liquidation address existe déjà en DB
-    if (user.bridgeLiquidationAddress) {
-      return res.json({ success: true, solana: user.bridgeLiquidationAddress });
+    const requestedChain = (chain || 'solana').toLowerCase();
+    const requestedCurrency = (currency || 'usdc').toLowerCase();
+    const key = `${requestedChain}_${requestedCurrency}`;
+
+    // Retourner l'adresse existante si déjà créée
+    if (user.bridgeLiquidationAddresses?.[key]) {
+      return res.json({ success: true, address: user.bridgeLiquidationAddresses[key], chain: requestedChain, currency: requestedCurrency });
     }
 
-    // Créer une liquidation address Bridge → destination POOL1
+    // Créer la liquidation address pour cette combinaison → destination POOL1
     const liqRes = await axios.post(
       `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/liquidation_addresses`,
       {
-        chain: 'solana',
-        currency: 'usdc',
+        chain: requestedChain,
+        currency: requestedCurrency,
         destination_payment_rail: 'solana',
         destination_currency: 'usdc',
         destination_address: '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX'
@@ -3064,18 +3068,19 @@ app.post('/api/deposit-addresses', async (req, res) => {
     const liqAddress = liqRes.data?.address;
     if (!liqAddress) throw new Error('Adresse non retournée par Bridge');
 
-    // Sauvegarder en DB pour ne pas recréer à chaque fois
-    users[email.toLowerCase()].bridgeLiquidationAddress = liqAddress;
+    if (!users[email.toLowerCase()].bridgeLiquidationAddresses) {
+      users[email.toLowerCase()].bridgeLiquidationAddresses = {};
+    }
+    users[email.toLowerCase()].bridgeLiquidationAddresses[key] = liqAddress;
     await writeDataSafe(users);
 
-    res.json({ success: true, solana: liqAddress });
+    res.json({ success: true, address: liqAddress, chain: requestedChain, currency: requestedCurrency });
 
   } catch (error) {
     console.error('❌ Erreur deposit-addresses:', error.response?.data || error.message);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.response?.data?.message || error.message });
   }
 });
-
 
 
 
