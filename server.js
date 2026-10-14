@@ -183,6 +183,45 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
       console.log(`🔄 Remboursement: ${userEmail} +${amount}`);
     }
 
+    // Off-ramp réussi → déduire du cashBalance
+    else if (event.type === 'transfer.payment_processed') {
+      const customerId = event.data?.on_behalf_of;
+      const amount = parseFloat(event.data?.amount || 0);
+      const transferId = event.data?.id;
+      if (!customerId || amount <= 0) return;
+      const userEmail = Object.keys(users).find(
+        email => users[email].bridgeCustomerId === customerId
+      );
+      if (!userEmail) {
+        console.error(`❌ transfer.payment_processed — customer_id introuvable: ${customerId}`);
+        return;
+      }
+      if (!users[userEmail].processedWebhooks) users[userEmail].processedWebhooks = [];
+      if (users[userEmail].processedWebhooks.includes(transferId)) {
+        console.log(`⚠️ Webhook déjà traité: ${transferId}`);
+        return;
+      }
+      users[userEmail].cashBalance = Math.max(0, (users[userEmail].cashBalance || 0) - amount);
+      users[userEmail].processedWebhooks.push(transferId);
+      if (users[userEmail].processedWebhooks.length > 200) {
+        users[userEmail].processedWebhooks = users[userEmail].processedWebhooks.slice(-200);
+      }
+      if (!users[userEmail].transactionHistory) users[userEmail].transactionHistory = [];
+      users[userEmail].transactionHistory.unshift({
+        id: transferId,
+        date: new Date().toISOString(),
+        type: 'withdrawal',
+        amount: -amount,
+        currency: event.data?.destination?.currency || 'fiat'
+      });
+      if (users[userEmail].transactionHistory.length > 50) {
+        users[userEmail].transactionHistory = users[userEmail].transactionHistory.slice(0, 50);
+      }
+      users[userEmail].lastUpdated = new Date().toISOString();
+      await writeDataSafe(users);
+      console.log(`💸 Off-ramp traité: ${userEmail} -${amount} (solde: ${users[userEmail].cashBalance})`);
+    }
+
     else {
       console.log(`ℹ️ Webhook ignoré: ${event.type}`);
     }
@@ -191,7 +230,6 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
     console.error('❌ Erreur webhook Bridge:', error.message);
   }
 });
-
 
 
 
@@ -2863,7 +2901,7 @@ app.post('/api/bridge/create-external-account', async (req, res) => {
 
     const accountPayload = {
       currency: currency.toLowerCase(),
-      account_owner_name: bankDetails.bankName,
+      account_owner_name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
       account_owner_type: 'individual',
       first_name: user.firstName || 'Sandbox',
       last_name: user.lastName || 'User',
