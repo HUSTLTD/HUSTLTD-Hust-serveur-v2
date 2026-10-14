@@ -2943,18 +2943,20 @@ app.post('/api/bridge/create-external-account', async (req, res) => {
 
     const paymentRail = currency === 'EUR' ? 'sepa' : currency === 'GBP' ? 'faster_payments' : 'ach';
 
+// Récupérer l'adresse depuis Bridge
+const customerRes = await axios.get(
+  `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}`,
+  { headers: { 'Api-Key': BRIDGE_API_KEY } }
+);
+const bridgeCustomer = customerRes.data;
+
 const accountPayload = {
   currency: currency.toLowerCase(),
   account_owner_name: bankDetails.accountHolderName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
   account_owner_type: 'individual',
-  first_name: user.firstName || 'Test',
-  last_name: user.lastName || 'User',
-  address: user.address || {
-    street_line_1: '123 Main St',
-    city: 'Paris',
-    country: 'FR',
-    postal_code: '75001'
-  },
+  first_name: bridgeCustomer.first_name || user.firstName || 'Test',
+  last_name: bridgeCustomer.last_name || user.lastName || 'User',
+  address: bridgeCustomer.address,
   ...(currency === 'EUR' ? {
     account: { iban: bankDetails.iban.replace(/\s/g, ''), bic: bankDetails.bic }
   } : currency === 'USD' ? {
@@ -2963,7 +2965,6 @@ const accountPayload = {
     account: { sort_code: bankDetails.sortCode.replace(/-/g, ''), account_number: bankDetails.account }
   })
 };
-
     const response = await axios.post(
       `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/external_accounts`,
       accountPayload,
