@@ -221,7 +221,35 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
       await writeDataSafe(users);
       console.log(`💸 Off-ramp traité: ${userEmail} -${amount} (solde: ${users[userEmail].cashBalance})`);
     }
-
+    
+    // KYC approuvé → sauvegarder les infos complètes du customer
+else if (event.type === 'customer.kyc_approved') {
+  const customerId = event.data?.id;
+  if (!customerId) return;
+  const userEmail = Object.keys(users).find(
+    email => users[email].bridgeCustomerId === customerId
+  );
+  if (!userEmail) {
+    console.error(`❌ kyc_approved — customer_id introuvable: ${customerId}`);
+    return;
+  }
+  try {
+    const customerRes = await axios.get(
+      `${BRIDGE_BASE_URL}/v0/customers/${customerId}`,
+      { headers: { 'Api-Key': BRIDGE_API_KEY } }
+    );
+    const c = customerRes.data;
+    users[userEmail].firstName = c.first_name || users[userEmail].firstName;
+    users[userEmail].lastName = c.last_name || users[userEmail].lastName;
+    users[userEmail].address = c.address || null;
+    users[userEmail].bridgeKycStatus = 'approved';
+    users[userEmail].lastUpdated = new Date().toISOString();
+    await writeDataSafe(users);
+    console.log(`✅ KYC approuvé, profil mis à jour: ${userEmail}`);
+  } catch (e) {
+    console.error(`❌ Erreur récupération customer Bridge: ${e.message}`);
+  }
+}
     else {
       console.log(`ℹ️ Webhook ignoré: ${event.type}`);
     }
@@ -2915,20 +2943,26 @@ app.post('/api/bridge/create-external-account', async (req, res) => {
 
     const paymentRail = currency === 'EUR' ? 'sepa' : currency === 'GBP' ? 'faster_payments' : 'ach';
 
-    const accountPayload = {
-      currency: currency.toLowerCase(),
-      account_owner_name: bankDetails.accountHolderName || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Account Owner',
-      account_owner_type: 'individual',
-      first_name: user.firstName || 'Sandbox',
-      last_name: user.lastName || 'User',
-      ...(currency === 'EUR' ? {
-        account: { iban: bankDetails.iban.replace(/\s/g, ''), bic: bankDetails.bic }
-      } : currency === 'USD' ? {
-        account: { routing_number: bankDetails.routing, account_number: bankDetails.account, checking_or_savings: 'checking' }
-      } : {
-        account: { sort_code: bankDetails.sortCode.replace(/-/g, ''), account_number: bankDetails.account }
-      })
-    };
+const accountPayload = {
+  currency: currency.toLowerCase(),
+  account_owner_name: bankDetails.accountHolderName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+  account_owner_type: 'individual',
+  first_name: user.firstName || 'Test',
+  last_name: user.lastName || 'User',
+  address: user.address || {
+    street_line_1: '123 Main St',
+    city: 'Paris',
+    country: 'FR',
+    postal_code: '75001'
+  },
+  ...(currency === 'EUR' ? {
+    account: { iban: bankDetails.iban.replace(/\s/g, ''), bic: bankDetails.bic }
+  } : currency === 'USD' ? {
+    account: { routing_number: bankDetails.routing, account_number: bankDetails.account, checking_or_savings: 'checking' }
+  } : {
+    account: { sort_code: bankDetails.sortCode.replace(/-/g, ''), account_number: bankDetails.account }
+  })
+};
 
     const response = await axios.post(
       `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}/external_accounts`,
