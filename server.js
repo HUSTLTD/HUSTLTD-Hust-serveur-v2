@@ -119,6 +119,9 @@ async function creditUser(users, customerId, amount, currency, depositId, source
   console.log(`✅ Crédité: ${userEmail} +${amount} ${currency.toUpperCase()} via ${source} (total: ${users[userEmail].cashBalance})`);
 }
 
+
+
+
 app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   res.sendStatus(200);
   try {
@@ -129,39 +132,38 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
     }
 
     const event = JSON.parse(req.body.toString());
-    console.log(`📨 Webhook Bridge reçu: ${event.type}`);
-    console.log('📨 Payload complet:', JSON.stringify(event)); // ← AJOUTER CETTE LIGNE
+    console.log(`📨 Webhook Bridge reçu: ${event.event_type}`);
 
     const users = await readData();
 
     // Dépôt via Virtual Account (IBAN / ACH / SEPA)
-    if (event.type === 'virtual_account.deposit.completed') {
-      const customerId = event.data?.customer_id;
-      const amount = parseFloat(event.data?.amount || 0);
-      const currency = event.data?.currency || 'usdc';
-      const depositId = event.data?.id;
+    if (event.event_type === 'virtual_account.deposit.completed') {
+      const customerId = event.event_object?.customer_id;
+      const amount = parseFloat(event.event_object?.amount || 0);
+      const currency = event.event_object?.currency || 'usdc';
+      const depositId = event.event_object?.id;
       if (!customerId || amount <= 0) return;
       await creditUser(users, customerId, amount, currency, depositId, 'virtual_account');
     }
 
     // Dépôt crypto direct USDC/USDT sur wallet Bridge
     else if (
-      event.type === 'wallet.deposit.completed' ||
-      event.type === 'liquidation_address.drain.completed'
+      event.event_type === 'wallet.deposit.completed' ||
+      event.event_type === 'liquidation_address.drain.completed'
     ) {
-      const customerId = event.data?.customer_id;
-      const amount = parseFloat(event.data?.amount || event.data?.net_amount || 0);
-      const currency = event.data?.currency || 'usdc';
-      const depositId = event.data?.id;
+      const customerId = event.event_object?.customer_id;
+      const amount = parseFloat(event.event_object?.amount || event.event_object?.net_amount || 0);
+      const currency = event.event_object?.currency || 'usdc';
+      const depositId = event.event_object?.id;
       if (!customerId || amount <= 0) return;
       await creditUser(users, customerId, amount, currency, depositId, 'crypto_deposit');
     }
 
     // Retrait échoué → remboursement automatique
-    else if (event.type === 'transfer.failed') {
-      const customerId = event.data?.on_behalf_of;
-      const amount = parseFloat(event.data?.amount || 0);
-      const transferId = event.data?.id;
+    else if (event.event_type === 'transfer.failed') {
+      const customerId = event.event_object?.on_behalf_of;
+      const amount = parseFloat(event.event_object?.amount || 0);
+      const transferId = event.event_object?.id;
       if (!customerId || amount <= 0) return;
       const userEmail = Object.keys(users).find(
         email => users[email].bridgeCustomerId === customerId
@@ -185,10 +187,10 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
     }
 
     // Off-ramp réussi → déduire du cashBalance
-    else if (event.type === 'transfer.payment_processed') {
-      const customerId = event.data?.on_behalf_of;
-      const amount = parseFloat(event.data?.amount || 0);
-      const transferId = event.data?.id;
+    else if (event.event_type === 'transfer.payment_processed') {
+      const customerId = event.event_object?.on_behalf_of;
+      const amount = parseFloat(event.event_object?.amount || 0);
+      const transferId = event.event_object?.id;
       if (!customerId || amount <= 0) return;
       const userEmail = Object.keys(users).find(
         email => users[email].bridgeCustomerId === customerId
@@ -213,7 +215,7 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
         date: new Date().toISOString(),
         type: 'withdrawal',
         amount: -amount,
-        currency: event.data?.destination?.currency || 'fiat'
+        currency: event.event_object?.destination?.currency || 'fiat'
       });
       if (users[userEmail].transactionHistory.length > 50) {
         users[userEmail].transactionHistory = users[userEmail].transactionHistory.slice(0, 50);
@@ -228,13 +230,9 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
 
 
 
-
-
-
-
     // KYC approuvé → profil + wallet + virtual accounts
-    else if (event.type === 'customer.kyc_approved') {
-      const customerId = event.data?.id;
+    else if (event.event_type === 'customer.kyc_approved') {
+      const customerId = event.event_object?.id;
       if (!customerId) return;
       const userEmail = Object.keys(users).find(
         email => users[email].bridgeCustomerId === customerId
@@ -320,7 +318,6 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
     console.error('❌ Erreur webhook Bridge:', e.message);
   }
 });
-
 
 
 
