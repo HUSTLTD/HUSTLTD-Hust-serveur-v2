@@ -2844,7 +2844,7 @@ app.get('/api/bridge/kyc-status/:email', async (req, res) => {
       `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}`,
       { headers: { 'Api-Key': BRIDGE_API_KEY } }
     );
-    const tosAccepted = r.data.tos_status === 'approved' || r.data.kyc_status !== 'not_started';
+    const tosAccepted = r.data.has_accepted_terms_of_service === true || r.data.kyc_status !== 'not_started';
     res.json({ success: true, tosAccepted, kycStatus: r.data.kyc_status, tosStatus: r.data.tos_status });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
