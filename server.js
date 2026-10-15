@@ -130,6 +130,7 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
 
     const event = JSON.parse(req.body.toString());
     console.log(`📨 Webhook Bridge reçu: ${event.type}`);
+    console.log('📨 Payload complet:', JSON.stringify(event)); // ← AJOUTER CETTE LIGNE
 
     const users = await readData();
 
