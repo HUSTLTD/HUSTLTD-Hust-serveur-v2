@@ -227,6 +227,37 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
     
 
 
+        // TOS accepté → sauvegarder en DB
+    else if (event.event_type === 'customer.updated') {
+      if (event.event_object?.has_accepted_terms_of_service === true) {
+        const customerId = event.event_object?.id;
+        const userEmail = Object.keys(users).find(e => users[e].bridgeCustomerId === customerId);
+        if (userEmail) {
+          users[userEmail].tosAccepted = true;
+          users[userEmail].lastUpdated = new Date().toISOString();
+          await writeDataSafe(users);
+          console.log(`✅ TOS accepté webhook: ${userEmail}`);
+        }
+      }
+    }
+
+
+
+
+    // KYC link URL → sauvegarder pour le frontend
+    else if (event.event_type === 'kyc_link.updated') {
+      console.log('🔍 kyc_link.updated object:', JSON.stringify(event.event_object));
+      const customerId = event.event_object?.customer_id;
+      const kycUrl = event.event_object?.kyc_link || event.event_object?.url || event.event_object?.kyc_link_url;
+      if (!customerId) return;
+      const userEmail = Object.keys(users).find(e => users[e].bridgeCustomerId === customerId);
+      if (userEmail && kycUrl) {
+        users[userEmail].kycUrl = kycUrl;
+        users[userEmail].lastUpdated = new Date().toISOString();
+        await writeDataSafe(users);
+        console.log(`✅ KYC URL sauvegardée: ${userEmail}`);
+      }
+    }
 
 
 
@@ -2832,7 +2863,6 @@ app.get('/api/bridge/kyc-link/:email', async (req, res) => {
   }
 });
 
-// Vérifier si le TOS est accepté (pour savoir quand ouvrir le lien KYC)
 app.get('/api/bridge/kyc-status/:email', async (req, res) => {
   try {
     const users = await readData();
@@ -2840,16 +2870,17 @@ app.get('/api/bridge/kyc-status/:email', async (req, res) => {
     if (!user?.bridgeCustomerId) {
       return res.status(404).json({ success: false, error: 'Client Bridge non trouvé' });
     }
-    const r = await axios.get(
-      `${BRIDGE_BASE_URL}/v0/customers/${user.bridgeCustomerId}`,
-      { headers: { 'Api-Key': BRIDGE_API_KEY } }
-    );
-    const tosAccepted = r.data.has_accepted_terms_of_service === true || r.data.kyc_status !== 'not_started';
-    res.json({ success: true, tosAccepted, kycStatus: r.data.kyc_status, tosStatus: r.data.tos_status });
+    res.json({
+      success: true,
+      tosAccepted: user.tosAccepted === true,
+      kycUrl: user.kycUrl || null,
+      kycStatus: user.bridgeKycStatus || 'not_started'
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
 
 // Créer wallet Bridge pour un client
 app.post('/api/bridge/create-wallet', async (req, res) => {
