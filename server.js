@@ -2685,8 +2685,9 @@ scheduleInterestCalculation();
 // 🌉 BRIDGE API - Intégration
 // ========================================
 
-const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY || 'sk-test-1b483bc088e89441b8e83aa0e2a765d3201a0fc631bd7752e9d7f46009793fd5c00e6dacff9b380';
-const BRIDGE_BASE_URL = 'https://api.sandbox.bridge.xyz';
+const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY;
+const BRIDGE_BASE_URL = 'https://api.bridge.xyz';
+
 
 // Créer un client Bridge lors de l'inscription HUST
 app.post('/api/bridge/create-customer', async (req, res) => {
