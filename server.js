@@ -222,6 +222,15 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
       console.log(`💸 Off-ramp traité: ${userEmail} -${amount} (solde: ${users[userEmail].cashBalance})`);
     }
     
+
+
+
+
+
+
+
+
+
     // KYC approuvé → profil + wallet + virtual accounts
     else if (event.type === 'customer.kyc_approved') {
       const customerId = event.data?.id;
@@ -306,7 +315,10 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
       }
     }
 
-
+  } catch (e) {
+    console.error('❌ Erreur webhook Bridge:', e.message);
+  }
+});
 
 
 
