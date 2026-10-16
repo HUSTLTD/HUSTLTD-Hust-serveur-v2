@@ -227,22 +227,119 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
     
 
 
-        // TOS accepté → sauvegarder en DB
+    // customer.updated → TOS + KYC approuvé/refusé
     else if (event.event_type === 'customer.updated') {
-      if (event.event_object?.has_accepted_terms_of_service === true) {
-        const customerId = event.event_object?.id;
-        const userEmail = Object.keys(users).find(e => users[e].bridgeCustomerId === customerId);
-        if (userEmail) {
-          users[userEmail].tosAccepted = true;
-          users[userEmail].lastUpdated = new Date().toISOString();
+      const obj = event.event_object;
+      const customerId = obj?.id;
+      const userEmail = Object.keys(users).find(e => users[e].bridgeCustomerId === customerId);
+
+      if (!userEmail) {
+        console.log(`⚠️ customer.updated — customer_id inconnu: ${customerId}`);
+        return;
+      }
+
+      // TOS accepté
+      if (obj?.has_accepted_terms_of_service === true && !users[userEmail].tosAccepted) {
+        users[userEmail].tosAccepted = true;
+        users[userEmail].lastUpdated = new Date().toISOString();
+        await writeDataSafe(users);
+        console.log(`✅ TOS accepté webhook: ${userEmail}`);
+      }
+
+      // KYC approuvé = status 'active' + tous les endorsements approved
+      const allEndorsementsApproved =
+        Array.isArray(obj?.endorsements) &&
+        obj.endorsements.length > 0 &&
+        obj.endorsements.every(e => e.status === 'approved');
+
+      if (
+        event.event_object_status === 'active' &&
+        obj?.status === 'active' &&
+        allEndorsementsApproved &&
+        users[userEmail].bridgeKycStatus !== 'approved'
+      ) {
+        users[userEmail].bridgeKycStatus = 'approved';
+        await writeDataSafe(users);
+        console.log(`✅ KYC approuvé (customer.updated active): ${userEmail}`);
+
+        try {
+          // 1. Mettre à jour le profil
+          const customerRes = await axios.get(
+            `${BRIDGE_BASE_URL}/v0/customers/${customerId}`,
+            { headers: { 'Api-Key': BRIDGE_API_KEY } }
+          );
+          const c = customerRes.data;
+          users[userEmail].firstName = c.first_name || users[userEmail].firstName;
+          users[userEmail].lastName = c.last_name || users[userEmail].lastName;
           await writeDataSafe(users);
-          console.log(`✅ TOS accepté webhook: ${userEmail}`);
+
+          // 2. Créer le wallet Solana si pas encore fait
+          if (!users[userEmail].bridgeWallet) {
+            const walletRes = await axios.post(
+              `${BRIDGE_BASE_URL}/v0/customers/${customerId}/wallets`,
+              { chain: 'solana' },
+              {
+                headers: {
+                  'Api-Key': BRIDGE_API_KEY,
+                  'Content-Type': 'application/json',
+                  'Idempotency-Key': `wallet-${userEmail}-kyc`
+                }
+              }
+            );
+            users[userEmail].bridgeWallet = walletRes.data;
+            await writeDataSafe(users);
+            console.log(`✅ Wallet Solana créé: ${userEmail}`);
+          }
+
+          // 3. Créer les virtual accounts EUR (SEPA) + USD (ACH)
+          if (!users[userEmail].bridgeVirtualAccounts) {
+            const POOL1_ADDRESS = '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX';
+            const dest = { payment_rail: 'solana', currency: 'usdc', address: POOL1_ADDRESS };
+            const vaConfigs = [
+              ['eur', { source: { payment_rail: 'sepa', currency: 'eur' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }],
+              ['usd', { source: { payment_rail: 'ach', currency: 'usd' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }]
+            ];
+            const results = {};
+            for (const [key, body] of vaConfigs) {
+              try {
+                const r = await axios.post(
+                  `${BRIDGE_BASE_URL}/v0/customers/${customerId}/virtual_accounts`,
+                  body,
+                  {
+                    headers: {
+                      'Api-Key': BRIDGE_API_KEY,
+                      'Content-Type': 'application/json',
+                      'Idempotency-Key': `va-${key}-${userEmail}-kyc`
+                    }
+                  }
+                );
+                results[key] = r.data;
+                console.log(`✅ VA ${key.toUpperCase()} créé: ${userEmail}`);
+              } catch (e) {
+                console.error(`⚠️ VA ${key} échoué:`, e.response?.data || e.message);
+              }
+            }
+            if (Object.keys(results).length > 0) {
+              users[userEmail].bridgeVirtualAccounts = results;
+              users[userEmail].lastUpdated = new Date().toISOString();
+              await writeDataSafe(users);
+              console.log(`✅ Comptes virtuels créés: ${userEmail}`);
+            }
+          }
+        } catch (e) {
+          console.error(`❌ Erreur création wallet/VA après KYC: ${e.message}`);
         }
       }
+
+      // KYC refusé
+      if (event.event_object_status === 'rejected' || obj?.status === 'rejected') {
+        users[userEmail].bridgeKycStatus = 'rejected';
+        users[userEmail].bridgeKycRejectionReasons = obj?.rejection_reasons || [];
+        users[userEmail].lastUpdated = new Date().toISOString();
+        await writeDataSafe(users);
+        console.log(`❌ KYC refusé: ${userEmail}`);
+      }
     }
-
-
-
 
     // KYC link URL → sauvegarder pour le frontend
     else if (event.event_type === 'kyc_link.updated') {
@@ -259,98 +356,10 @@ app.post('/api/bridge/webhook', express.raw({ type: 'application/json' }), async
       }
     }
 
-
-
-    // KYC approuvé → profil + wallet + virtual accounts
-    else if (event.event_type === 'customer.kyc_approved') {
-      const customerId = event.event_object?.id;
-      if (!customerId) return;
-      const userEmail = Object.keys(users).find(
-        email => users[email].bridgeCustomerId === customerId
-      );
-      if (!userEmail) {
-        console.error(`❌ kyc_approved — customer_id introuvable: ${customerId}`);
-        return;
-      }
-      try {
-        // 1. Mettre à jour le profil
-        const customerRes = await axios.get(
-          `${BRIDGE_BASE_URL}/v0/customers/${customerId}`,
-          { headers: { 'Api-Key': BRIDGE_API_KEY } }
-        );
-        const c = customerRes.data;
-        users[userEmail].firstName = c.first_name || users[userEmail].firstName;
-        users[userEmail].lastName = c.last_name || users[userEmail].lastName;
-        users[userEmail].address = c.address || null;
-        users[userEmail].bridgeKycStatus = 'approved';
-        await writeDataSafe(users);
-        console.log(`✅ KYC approuvé, profil mis à jour: ${userEmail}`);
-
-        // 2. Créer le wallet Solana si pas encore fait
-        if (!users[userEmail].bridgeWallet) {
-          const walletRes = await axios.post(
-            `${BRIDGE_BASE_URL}/v0/customers/${customerId}/wallets`,
-            { chain: 'solana' },
-            {
-              headers: {
-                'Api-Key': BRIDGE_API_KEY,
-                'Content-Type': 'application/json',
-                'Idempotency-Key': `wallet-${userEmail}-kyc`
-              }
-            }
-          );
-          users[userEmail].bridgeWallet = walletRes.data;
-          await writeDataSafe(users);
-          console.log(`✅ Wallet créé via webhook: ${userEmail}`);
-        }
-
-        // 3. Créer les virtual accounts (IBAN EUR + USD + GBP) si pas encore fait
-        if (!users[userEmail].bridgeVirtualAccounts) {
-          const POOL1_ADDRESS = '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX';
-          const dest = { payment_rail: 'solana', currency: 'usdc', address: POOL1_ADDRESS };
-          const vaConfigs = [
-            ['eur', { source: { payment_rail: 'sepa', currency: 'eur' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }],
-            ['usd', { source: { payment_rail: 'ach', currency: 'usd' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }],
-            ['gbp', { source: { payment_rail: 'faster_payments', currency: 'gbp' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }]
-          ];
-          const results = {};
-          for (const [key, body] of vaConfigs) {
-            try {
-              const r = await axios.post(
-                `${BRIDGE_BASE_URL}/v0/customers/${customerId}/virtual_accounts`,
-                body,
-                {
-                  headers: {
-                    'Api-Key': BRIDGE_API_KEY,
-                    'Content-Type': 'application/json',
-                    'Idempotency-Key': `va-${key}-${userEmail}-kyc`
-                  }
-                }
-              );
-              results[key] = r.data;
-              console.log(`✅ VA ${key.toUpperCase()} créé: ${userEmail}`);
-            } catch (e) {
-              console.error(`⚠️ VA ${key} échoué:`, e.response?.data || e.message);
-            }
-          }
-          if (Object.keys(results).length > 0) {
-            users[userEmail].bridgeVirtualAccounts = results;
-            users[userEmail].lastUpdated = new Date().toISOString();
-            await writeDataSafe(users);
-            console.log(`✅ Comptes virtuels créés via webhook: ${userEmail}`);
-          }
-        }
-      } catch (e) {
-        console.error(`❌ Erreur kyc_approved webhook: ${e.message}`);
-      }
-    }
-
   } catch (e) {
     console.error('❌ Erreur webhook Bridge:', e.message);
   }
 });
-
-
 
 
 // Middleware
