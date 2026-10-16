@@ -3235,55 +3235,37 @@ app.post('/api/admin/create-wallet-va/:email', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'user not found' });
     const customerId = user.bridgeCustomerId;
 
-    // Wallet
-    if (!user.bridgeWallet) {
+    const POOL1_ADDRESS = '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX';
+    const dest = { payment_rail: 'solana', currency: 'usdc', address: POOL1_ADDRESS };
+    const results = {};
+
+    for (const [key, body] of [
+      ['eur', { source: { payment_rail: 'sepa', currency: 'eur' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }],
+      ['usd', { source: { payment_rail: 'ach', currency: 'usd' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }]
+    ]) {
       try {
-        const w = await axios.post(
-          `${BRIDGE_BASE_URL}/v0/customers/${customerId}/wallets`,
-          { chain: 'solana' },
-          { headers: { 'Api-Key': BRIDGE_API_KEY, 'Content-Type': 'application/json', 'Idempotency-Key': `wallet-${email}-manual` } }
+        const r = await axios.post(
+          `${BRIDGE_BASE_URL}/v0/customers/${customerId}/virtual_accounts`,
+          body,
+          { headers: { 'Api-Key': BRIDGE_API_KEY, 'Content-Type': 'application/json', 'Idempotency-Key': `va-${key}-${email}-manual` } }
         );
-        users[email].bridgeWallet = w.data;
-        await writeDataSafe(users);
-        console.log('✅ Wallet créé manuellement');
+        results[key] = r.data;
+        console.log(`✅ VA ${key} créé`);
       } catch (e) {
-        console.error('❌ Wallet error:', e.response?.data || e.message);
-        return res.json({ step: 'wallet', error: e.response?.data || e.message });
+        console.error(`❌ VA ${key}:`, e.response?.data || e.message);
+        return res.json({ step: `va-${key}`, error: e.response?.data || e.message });
       }
     }
 
-    // VA
-    if (!user.bridgeVirtualAccounts) {
-      const POOL1_ADDRESS = '38SAXkS8Xy5dph5NK4UU2S2u2Pxnah9NrHhQrAg1q6DX';
-      const dest = { payment_rail: 'solana', currency: 'usdc', address: POOL1_ADDRESS };
-      const results = {};
-      for (const [key, body] of [
-        ['eur', { source: { payment_rail: 'sepa', currency: 'eur' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }],
-        ['usd', { source: { payment_rail: 'ach', currency: 'usd' }, destination: dest, developer_fee_percent: '0', on_behalf_of: customerId }]
-      ]) {
-        try {
-          const r = await axios.post(
-            `${BRIDGE_BASE_URL}/v0/customers/${customerId}/virtual_accounts`,
-            body,
-            { headers: { 'Api-Key': BRIDGE_API_KEY, 'Content-Type': 'application/json', 'Idempotency-Key': `va-${key}-${email}-manual` } }
-          );
-          results[key] = r.data;
-        } catch (e) {
-          console.error(`❌ VA ${key}:`, e.response?.data || e.message);
-          return res.json({ step: `va-${key}`, error: e.response?.data || e.message });
-        }
-      }
-      users[email].bridgeVirtualAccounts = results;
-      users[email].lastUpdated = new Date().toISOString();
-      await writeDataSafe(users);
-    }
+    users[email].bridgeVirtualAccounts = results;
+    users[email].lastUpdated = new Date().toISOString();
+    await writeDataSafe(users);
 
-    res.json({ success: true, wallet: users[email].bridgeWallet, va: users[email].bridgeVirtualAccounts });
+    res.json({ success: true, va: results });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
-
 
 
 
